@@ -1109,7 +1109,7 @@ impl eframe::App for TorrentApp {
             && started.elapsed() < Duration::from_secs(if error { 14 } else { 4 })
         {
             Area::new(Id::new("notice"))
-                .anchor(Align2::CENTER_BOTTOM, vec2(100.0, -20.0))
+                .anchor(Align2::CENTER_BOTTOM, vec2(0.0, -20.0))
                 .order(Order::Tooltip)
                 .show(ctx, |ui| {
                     card(p)
@@ -1123,6 +1123,7 @@ impl eframe::App for TorrentApp {
                         .show(ui, |ui| {
                             ui.set_max_width(540.0);
                             ui.horizontal(|ui| {
+                                ui.set_min_height(32.0);
                                 let (r, _) =
                                     ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
                                 icon(
