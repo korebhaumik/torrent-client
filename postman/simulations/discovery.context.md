@@ -8,9 +8,18 @@ original provider response shapes; they are not provider-owned contracts.
 
 ## Execution
 
-Use the start and client commands in `README.md`. Redirect simulation NDJSON to an
-ignored `.qa/` file; wait for `listening` before running the client. Inspect request
-events by provider path and status, then stop the simulation with Ctrl-C.
+Build the real client, then start the local fixtures:
+
+```sh
+./scripts/cargo.sh build --locked
+postman simulation run postman/simulations/discovery.sim.yaml --port 4900 --output ndjson
+# In another terminal:
+python3 scripts/check-search.py
+```
+
+Wait for `listening` before running the checks. Redirect NDJSON to an ignored
+`.qa/` file when recording a run. Inspect request events by provider path and
+status, then stop the simulation with Ctrl-C.
 
 ## Assumptions
 

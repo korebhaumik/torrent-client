@@ -76,8 +76,8 @@ Run from the repository root (the wrapper uses `.tools/` if installed):
 
 Omit `--offline` when dependencies must first be fetched. Engine tests need local
 TCP access; sandbox network failures are not evidence of a product regression.
-For search changes, also run the HTTP fixtures documented in `README.md`, including
-provider failures and malformed input. Add focused tests for behavior changed or
+For search changes, also run the HTTP fixtures documented in
+`postman/simulations/discovery.context.md`, including provider failures and malformed input. Add focused tests for behavior changed or
 new risks; avoid tests that merely repeat implementation. For UI changes inspect
 the relevant views in an isolated `TORRENT_DATA_DIR`, including small windows and
 both themes when relevant. Do not interrupt an app session the user is using.
