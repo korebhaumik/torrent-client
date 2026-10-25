@@ -241,19 +241,15 @@ pub(crate) fn icon(p: &Painter, r: Rect, g: Glyph, color: Color32) {
             line(&[(0.66, 0.56), (0.8, 0.56)]);
         }
         Glyph::Settings => {
-            p.circle_stroke(r.center(), r.width() * 0.3, stroke);
-            p.circle_stroke(r.center(), r.width() * 0.11, stroke);
-            for i in 0..8 {
-                let a = i as f32 * std::f32::consts::TAU / 8.0;
-                let d = vec2(a.cos(), a.sin());
-                p.line_segment(
-                    [
-                        r.center() + d * r.width() * 0.3,
-                        r.center() + d * r.width() * 0.43,
-                    ],
-                    stroke,
-                );
+            let mut outline = Vec::with_capacity(32);
+            for tooth in 0..8 {
+                for (offset, radius) in [(0.0, 0.32), (0.2, 0.43), (0.6, 0.43), (0.8, 0.32)] {
+                    let angle = (tooth as f32 + offset) * std::f32::consts::TAU / 8.0;
+                    outline.push(r.center() + vec2(angle.cos(), angle.sin()) * r.width() * radius);
+                }
             }
+            p.add(Shape::closed_line(outline, stroke));
+            p.circle_stroke(r.center(), r.width() * 0.13, stroke);
         }
         Glyph::Copy => {
             p.rect_stroke(

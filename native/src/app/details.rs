@@ -285,13 +285,19 @@ impl TorrentApp {
                 small(ui, label, p);
                 ui.horizontal(|ui| {
                     let width = (ui.available_width() - 42.0).max(50.0);
-                    ui.add_sized(
-                        [width, 24.0],
-                        Label::new(mono(text, 11.0, p.text))
-                            .halign(Align::Min)
-                            .truncate(),
-                    )
-                    .on_hover_text(text);
+                    ui.allocate_ui_with_layout(
+                        vec2(width, 32.0),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ui.set_min_size(vec2(width, 32.0));
+                            ui.add(
+                                Label::new(mono(text, 11.0, p.text))
+                                    .halign(Align::Min)
+                                    .truncate(),
+                            )
+                            .on_hover_text(text);
+                        },
+                    );
                     if icon_button(
                         ui,
                         Glyph::Copy,
