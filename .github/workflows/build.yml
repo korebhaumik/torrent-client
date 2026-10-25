@@ -1,0 +1,85 @@
+name: Desktop builds
+
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustup target add x86_64-pc-windows-msvc
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --locked --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+      - name: Test (including local peer transfer and restart recovery)
+        run: cargo test --locked --target x86_64-pc-windows-msvc -- --test-threads=1
+      - name: Package Windows x64
+        run: ./scripts/build-windows.ps1 release
+      - name: Verify packaged diagnostic CLI
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem dist/Torrent-*-windows-x64.zip
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath .qa/package-smoke
+          $exe = (Get-ChildItem .qa/package-smoke -Filter Torrent.exe -Recurse).FullName
+          $p = Start-Process $exe -ArgumentList '--search' -Wait -PassThru -RedirectStandardOutput .qa/cli-out.txt -RedirectStandardError .qa/cli-error.txt
+          if ($p.ExitCode -ne 1 -or (Get-Content .qa/cli-error.txt -Raw) -notmatch 'Usage:') {
+            throw 'The packaged GUI executable did not report diagnostic CLI errors correctly.'
+          }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Torrent-windows-x64
+          path: |
+            dist/Torrent-*-windows-x64.zip
+            dist/Torrent-*-windows-x64.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+      - name: Check formatting
+        run: ./scripts/cargo.sh fmt --all -- --check
+      - name: Clippy
+        run: ./scripts/cargo.sh clippy --locked --all-targets -- -D warnings
+      - name: Test
+        run: ./scripts/cargo.sh test --locked -- --test-threads=1
+      - name: Package macOS Apple Silicon
+        run: |
+          ./scripts/build-macos.sh release
+          ditto -c -k --sequesterRsrc --keepParent dist/Torrent.app dist/Torrent-macos-arm64.zip
+          cd dist
+          shasum -a 256 Torrent-macos-arm64.zip > Torrent-macos-arm64.zip.sha256
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Torrent-macos-arm64
+          path: |
+            dist/Torrent-macos-arm64.zip
+            dist/Torrent-macos-arm64.zip.sha256
+          if-no-files-found: error
+          compression-level: 0

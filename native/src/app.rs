@@ -384,7 +384,10 @@ impl TorrentApp {
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if primary(ui, "+  Add torrent")
-                            .on_hover_text("Add a magnet link or torrent file · ⌘K")
+                            .on_hover_text(format!(
+                                "Add a magnet link or torrent file · {}",
+                                command_shortcut(ui.ctx(), Key::K)
+                            ))
                             .clicked()
                         {
                             self.open_add();
@@ -598,11 +601,12 @@ impl TorrentApp {
                 }
             });
             content.add_space(6.0);
-            small(
-                &mut content,
-                "⌘K to add a torrent  ·  ⌘O to choose a file",
-                p,
+            let hint = format!(
+                "{} to add a torrent  ·  {} to choose a file",
+                command_shortcut(content.ctx(), Key::K),
+                command_shortcut(content.ctx(), Key::O)
             );
+            small(&mut content, hint, p);
             return;
         }
         let cols = ((ui.available_width() + 14.0) / 270.0)

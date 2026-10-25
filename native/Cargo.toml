@@ -2,7 +2,7 @@
 name = "torrent-desktop"
 version = "2.1.0"
 edition = "2024"
-description = "Standalone native macOS torrent client"
+description = "Standalone native macOS and Windows torrent client"
 license = "MIT"
 
 [dependencies]
@@ -26,6 +26,12 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+
+[build-dependencies]
+winresource = { version = "0.1.31", default-features = false }
 
 [dev-dependencies]
 sha1 = "0.10"

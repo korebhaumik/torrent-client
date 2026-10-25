@@ -24,7 +24,7 @@ impl Paths {
         let data = match std::env::var_os("TORRENT_DATA_DIR") {
             Some(p) => PathBuf::from(p),
             None => directories::ProjectDirs::from("", "", "Torrent Desktop")
-                .context("Cannot locate Application Support")?
+                .context("Cannot locate the application data folder")?
                 .data_local_dir()
                 .to_owned(),
         };
@@ -106,7 +106,11 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         let mut file = File::create(&temp)?;
         file.write_all(bytes)?;
         file.sync_all()?;
+        drop(file);
         fs::rename(&temp, path)?;
+        // Unix can flush the renamed directory entry. Windows cannot open a
+        // directory with File::open; the temporary file has already been flushed.
+        #[cfg(unix)]
         File::open(parent)?.sync_all()?;
         Ok(())
     })();

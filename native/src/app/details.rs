@@ -160,13 +160,22 @@ impl TorrentApp {
                                                 self.open_path(&file.path);
                                             }
                                         });
-                                        if ghost(ui, "Show in Finder", Some(Glyph::Folder), p)
-                                            .clicked()
+                                        if ghost(
+                                            ui,
+                                            crate::platform::REVEAL_LABEL,
+                                            Some(Glyph::Folder),
+                                            p,
+                                        )
+                                        .clicked()
+                                            && let Err(e) = crate::platform::reveal_file(&file.path)
                                         {
-                                            let _ = std::process::Command::new("/usr/bin/open")
-                                                .arg("-R")
-                                                .arg(&file.path)
-                                                .spawn();
+                                            self.notice(
+                                                format!(
+                                                    "Cannot reveal {}: {e}",
+                                                    file.path.display()
+                                                ),
+                                                true,
+                                            );
                                         }
                                     });
                                 });

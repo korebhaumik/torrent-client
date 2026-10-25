@@ -155,10 +155,12 @@ impl TorrentApp {
                                             self.magnet_input = text.trim().into();
                                             self.add_error = None;
                                         }
-                                        Err(_) => self.add_error = Some(
-                                            "Clipboard unavailable. Paste into the field with ⌘V."
-                                                .into(),
-                                        ),
+                                        Err(_) => {
+                                            self.add_error = Some(format!(
+                                                "Clipboard unavailable. Paste into the field with {}.",
+                                                command_shortcut(ui.ctx(), Key::V)
+                                            ));
+                                        }
                                     }
                                 }
                             });
@@ -217,7 +219,11 @@ impl TorrentApp {
                         ui.spinner();
                         muted(ui, "Adding torrent…", p);
                     } else {
-                        small(ui, "⌘↵ to add", p);
+                        small(
+                            ui,
+                            format!("{} to add", command_shortcut(ui.ctx(), Key::Enter)),
+                            p,
+                        );
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_enabled_ui(valid && !self.adding, |ui| {
@@ -353,7 +359,11 @@ impl TorrentApp {
                             if self.delete_files {
                                 "Files will be permanently deleted from disk."
                             } else {
-                                "Your downloaded files will stay on this Mac."
+                                if cfg!(target_os = "macos") {
+                                    "Your downloaded files will stay on this Mac."
+                                } else {
+                                    "Your downloaded files will stay on this computer."
+                                }
                             },
                             p,
                         );
@@ -401,7 +411,11 @@ impl TorrentApp {
                 if dialog_header(
                     ui,
                     "Preferences",
-                    "Make Torrent feel at home on your Mac.",
+                    if cfg!(target_os = "macos") {
+                        "Make Torrent feel at home on your Mac."
+                    } else {
+                        "Make Torrent feel at home on your PC."
+                    },
                     Glyph::Settings,
                     BLUE,
                     p,
@@ -505,7 +519,16 @@ impl TorrentApp {
                         )
                         .show(ui, |ui| {
                             small(ui, self.paths.data.display().to_string(), p);
-                            muted(ui, "⌘K  Add torrent     ⌘O  Open file     ⌘F  Search", p);
+                            muted(
+                                ui,
+                                format!(
+                                    "{}  Add torrent     {}  Open file     {}  Search",
+                                    command_shortcut(ui.ctx(), Key::K),
+                                    command_shortcut(ui.ctx(), Key::O),
+                                    command_shortcut(ui.ctx(), Key::F)
+                                ),
+                                p,
+                            );
                         });
                     });
                 ui.add_space(16.0);
