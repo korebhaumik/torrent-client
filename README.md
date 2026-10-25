@@ -49,6 +49,10 @@ The locally installed compiler lives in `.tools/`; it did not change the system 
 
 App code is in `native/src/`. `Cargo.lock` pins dependency versions. The small Swift script only generates the macOS icon during a build; the application itself is Rust.
 
+Read [AGENTS.md](AGENTS.md) for module ownership, coding conventions, data invariants,
+and verification requirements. The [optimization report](docs/optimization.md)
+records release-size measurements, refactoring boundaries, and regression coverage.
+
 Development overrides:
 
 - `TORRENT_DATA_DIR`: isolated app-state directory.

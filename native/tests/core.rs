@@ -46,7 +46,7 @@ fn settings(folder: &Path) -> Settings {
 fn wait(engine: &Engine, description: &str, predicate: impl Fn(&Snapshot) -> bool) {
     let start = Instant::now();
     loop {
-        let snapshot = engine.snapshot.lock().unwrap().clone();
+        let snapshot = engine.snapshot();
         if predicate(&snapshot) {
             return;
         }
@@ -135,10 +135,14 @@ fn engine_restores_paused_files_and_removes_only_selected_torrent() {
     wait(&engine, "verify fixture", |s| {
         s.torrents.first().is_some_and(|t| t.done)
     });
+    let before_pause = engine.snapshot();
     engine.send(Command::Pause(hash.clone()));
     wait(&engine, "pause", |s| {
         s.torrents.first().is_some_and(|t| t.paused)
     });
+    // Published views remain consistent while the worker publishes newer state.
+    assert!(!before_pause.torrents[0].paused);
+    assert!(engine.snapshot().torrents[0].paused);
     engine.shutdown();
     fs::remove_file(source).unwrap();
     let mut restored = Engine::start(paths.clone(), options);
@@ -195,7 +199,7 @@ fn multi_file_layout_matches_webtorrent() {
     wait(&engine, "multi-file verification", |s| {
         s.torrents.first().is_some_and(|t| t.done)
     });
-    let snapshot = engine.snapshot.lock().unwrap().clone();
+    let snapshot = engine.snapshot();
     assert_eq!(snapshot.torrents[0].files[0].path, file);
     assert_eq!(fs::read(file).unwrap(), data);
     engine.shutdown();

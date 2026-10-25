@@ -3,6 +3,8 @@ members = ["native"]
 resolver = "2"
 
 [profile.release]
+# Keep unwind-based cleanup; optimize for size without changing panic behavior.
+opt-level = "s"
 lto = "thin"
 codegen-units = 1
 strip = true
