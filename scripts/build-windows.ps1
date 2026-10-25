@@ -8,6 +8,9 @@ Set-StrictMode -Version Latest
 if ($env:OS -ne 'Windows_NT') {
     throw 'Build on Windows with the Rust MSVC toolchain and Visual Studio C++ Build Tools.'
 }
+if (-not (Get-Command nasm -CommandType Application -ErrorAction SilentlyContinue)) {
+    throw 'NASM is required to build aws-lc-sys. Install NASM, add its directory to PATH, and restart PowerShell.'
+}
 
 $repo = Split-Path $PSScriptRoot -Parent
 $target = 'x86_64-pc-windows-msvc'
