@@ -1,10 +1,16 @@
+mod cache;
+mod parsing;
+
+use cache::SearchCache;
+pub use parsing::{clean_html, size_bytes, tokens};
+use parsing::{fitgirl_row, fitgirl_rss, n, relevant, s, valid_hash};
+
 use crate::model::{SearchResponse, SearchResult, magnet};
 use anyhow::{Context, Result, bail};
 use futures::{
     future::join_all,
     stream::{FuturesUnordered, StreamExt},
 };
-use regex::Regex;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
@@ -16,7 +22,7 @@ use std::{
 pub struct SearchClient {
     client: reqwest::Client,
     base: Option<String>,
-    cache: Arc<Mutex<HashMap<String, (Instant, SearchResponse)>>>,
+    cache: Arc<Mutex<SearchCache>>,
 }
 
 impl SearchClient {
@@ -60,10 +66,13 @@ impl SearchClient {
             return SearchResponse::default();
         }
         let key = format!("{source}:{}", query.to_lowercase());
-        if let Some((time, cached)) = self.cache.lock().unwrap().get(&key)
-            && time.elapsed() < Duration::from_secs(300)
+        if let Some(cached) = self
+            .cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&key, Instant::now())
         {
-            return cached.clone();
+            return cached;
         }
         let sources = if source == "all" {
             vec!["piratebay", "fitgirl", "yts", "tv"]
@@ -97,10 +106,11 @@ impl SearchClient {
             .results
             .sort_by_key(|a| std::cmp::Reverse(a.seeders));
         if response.warnings.is_empty() {
-            self.cache
-                .lock()
-                .unwrap()
-                .insert(key, (Instant::now(), response.clone()));
+            self.cache.lock().unwrap_or_else(|e| e.into_inner()).insert(
+                key,
+                response.clone(),
+                Instant::now(),
+            );
         }
         response
     }
@@ -204,27 +214,7 @@ impl SearchClient {
             if !rss.contains("<rss") && !rss.contains("<feed") {
                 bail!("FitGirl returned an invalid RSS response");
             }
-            let item_re = Regex::new(r"(?is)<item>(.*?)</item>").unwrap();
-            for item in item_re.captures_iter(&rss) {
-                let get = |tag: &str| -> String {
-                    let re =
-                        Regex::new(&format!(r"(?is)<{tag}(?:\s[^>]*)?>(.*?)</{tag}>")).unwrap();
-                    re.captures(&item[1])
-                        .map(|c| {
-                            c[1].trim()
-                                .trim_start_matches("<![CDATA[")
-                                .trim_end_matches("]]>")
-                                .to_owned()
-                        })
-                        .unwrap_or_default()
-                };
-                let title = get("title");
-                let content = get("content:encoded");
-                let link = get("link");
-                if let Some(row) = fitgirl_row(&title, &content, &link, &tokens) {
-                    results.push(row);
-                }
-            }
+            results.extend(fitgirl_rss(&rss, &tokens));
         }
         if self.base.is_none() {
             let swarm = scrape(&results.iter().map(|r| r.hash.clone()).collect::<Vec<_>>()).await;
@@ -238,6 +228,7 @@ impl SearchClient {
         Ok(results)
     }
     async fn yts(&self, q: &str) -> Result<Vec<SearchResult>> {
+        let query_tokens = tokens(q);
         let mut last_error = anyhow::anyhow!("All YTS mirrors failed");
         for base in ["https://yts.lt", "https://yts.mx"] {
             match self
@@ -282,7 +273,7 @@ impl SearchClient {
                                 s(&t["quality"]),
                                 s(&t["type"])
                             );
-                            if !relevant(&name, &tokens(q)) {
+                            if !relevant(&name, &query_tokens) {
                                 continue;
                             }
                             results.push(SearchResult {
@@ -353,6 +344,7 @@ impl SearchClient {
             Err(last_error)
         }))
         .await;
+        let query_tokens = tokens(q);
         let mut results = vec![];
         let mut seen = HashSet::new();
         let mut failure = None;
@@ -365,7 +357,7 @@ impl SearchClient {
                         let name = s(&t["filename"]);
                         if !valid_hash(&hash)
                             || !seen.insert(hash.clone())
-                            || !relevant(&name, &tokens(q))
+                            || !relevant(&name, &query_tokens)
                         {
                             continue;
                         }
@@ -407,99 +399,6 @@ pub fn source_name(source: &str) -> &str {
         "tv" => "TV Shows",
         _ => "All",
     }
-}
-fn s(v: &Value) -> String {
-    v.as_str().map(str::to_owned).unwrap_or_else(|| {
-        if v.is_null() {
-            String::new()
-        } else {
-            v.to_string()
-        }
-    })
-}
-fn n(v: &Value) -> u64 {
-    v.as_u64().unwrap_or_else(|| s(v).parse().unwrap_or(0))
-}
-fn valid_hash(h: &str) -> bool {
-    h.len() == 40 && h.chars().all(|c| c.is_ascii_hexdigit())
-}
-pub fn tokens(q: &str) -> Vec<String> {
-    q.to_lowercase()
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|s| s.len() >= 2 && !["the", "and", "for"].contains(s))
-        .map(str::to_owned)
-        .collect()
-}
-fn relevant(name: &str, tokens: &[String]) -> bool {
-    let name = name.to_lowercase();
-    tokens.iter().any(|t| name.contains(t))
-}
-pub fn clean_html(html: &str) -> String {
-    let no_code = Regex::new(r"(?is)<(script|style)\b[^>]*>.*?</(?:script|style)>")
-        .unwrap()
-        .replace_all(html, "");
-    let breaks = Regex::new(r"(?i)<br\s*/?>|</(?:p|div|li|h[1-6])>")
-        .unwrap()
-        .replace_all(&no_code, "\n");
-    let stripped = Regex::new(r"<[^>]+>").unwrap().replace_all(&breaks, " ");
-    let decoded = html_escape::decode_html_entities(&stripped);
-    decoded
-        .lines()
-        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
-        .filter(|l| !l.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-        .chars()
-        .take(3000)
-        .collect()
-}
-pub fn size_bytes(text: &str) -> u64 {
-    let re = Regex::new(r"(?i)^\s*([\d.]+)\s*([a-z]+)\s*$").unwrap();
-    let Some(c) = re.captures(text) else {
-        return 0;
-    };
-    let value = c[1].parse::<f64>().unwrap_or(0.0);
-    let power = match c[2].to_lowercase().as_str() {
-        "k" | "kb" | "kib" => 1,
-        "m" | "mb" | "mib" => 2,
-        "g" | "gb" | "gib" => 3,
-        "t" | "tb" | "tib" => 4,
-        _ => 0,
-    };
-    (value * 1024_f64.powi(power)).round() as u64
-}
-fn fitgirl_row(title: &str, content: &str, link: &str, tokens: &[String]) -> Option<SearchResult> {
-    let title = clean_html(title);
-    if !relevant(&title, tokens) {
-        return None;
-    }
-    let decoded = html_escape::decode_html_entities(content);
-    let re = Regex::new(r#"(?i)magnet:\?xt=urn:btih:([a-f0-9]{40})[^"'\s<]*"#).unwrap();
-    let m = re.captures(&decoded)?;
-    let uri = m[0].to_owned();
-    let hash = m[1].to_lowercase();
-    let text = clean_html(content);
-    let size_re=Regex::new(r"(?i)(?:repack size|selective download)\s*:?\s*(?:from\s*)?([\d.]+)(?:\s*[/–-]\s*[\d.]+)?\s*(gib|mib|gb|mb)\b").unwrap();
-    let size = size_re
-        .captures(&text)
-        .map(|c| size_bytes(&format!("{} {}", &c[1], &c[2])))
-        .unwrap_or(0);
-    let name = Regex::new(r"(?i)\s*[-–—|]?\s*\[?fitgirl(?:\s+repacks?)?\]?\s*$")
-        .unwrap()
-        .replace(&title, "")
-        .trim()
-        .to_owned();
-    Some(SearchResult {
-        source: "fitgirl".into(),
-        name,
-        size,
-        hash,
-        magnet: uri,
-        details_url: link.into(),
-        category: "Games".into(),
-        description: text,
-        ..Default::default()
-    })
 }
 
 async fn scrape(hashes: &[String]) -> HashMap<String, (u64, u64)> {

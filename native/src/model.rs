@@ -105,7 +105,10 @@ impl Torrent {
             _ => true,
         };
         let q = query.trim().to_lowercase();
-        matches && (self.name.to_lowercase().contains(&q) || self.hash.to_lowercase().contains(&q))
+        matches
+            && (q.is_empty()
+                || self.name.to_lowercase().contains(&q)
+                || self.hash.to_lowercase().contains(&q))
     }
 }
 

@@ -7,11 +7,11 @@ if [[ -x .tools/cargo/bin/cargo ]]; then
   export PATH="$CARGO_HOME/bin:$PATH"
 fi
 profile="${1:-release}"
-if [[ "$profile" == debug ]]; then
-  cargo build --locked
-else
-  cargo build --release --locked
-fi
+case "$profile" in
+  debug) cargo build --locked ;;
+  release) cargo build --release --locked ;;
+  *) printf 'Usage: %s [debug|release]\n' "$0" >&2; exit 2 ;;
+esac
 bundle="$PWD/dist/Torrent.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 cp "target/$profile/torrent-desktop" "$bundle/Contents/MacOS/Torrent"
