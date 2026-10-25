@@ -27,6 +27,14 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup default stable
           rustup target add x86_64-pc-windows-msvc
+      - name: Install NASM for aws-lc-sys
+        shell: pwsh
+        run: |
+          choco install nasm --version=3.2.0 --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'NASM installation failed.' }
+          Join-Path $env:ProgramFiles 'NASM' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Verify NASM is on PATH
+        run: nasm -v
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Clippy

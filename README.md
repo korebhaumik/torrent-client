@@ -25,8 +25,9 @@ The current build targets Apple Silicon. The app is locally signed, but not nota
 ### Windows (x64)
 
 Build on Windows with Rust's `x86_64-pc-windows-msvc` toolchain and Visual Studio
-Build Tools with **Desktop development with C++** (including the Windows SDK).
-From the repository root in PowerShell:
+Build Tools with **Desktop development with C++** (including the Windows SDK),
+and [NASM](https://www.nasm.us/) on `PATH` for the TLS dependency's assembly code.
+From the repository root in PowerShell (check `nasm -v` before building):
 
 ```powershell
 rustup target add x86_64-pc-windows-msvc

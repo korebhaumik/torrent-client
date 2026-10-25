@@ -7,10 +7,14 @@ not part of this build.
 
 ## Build and distribute
 
-Install stable Rust and Visual Studio C++ Build Tools with the Windows SDK.
+Install stable Rust, Visual Studio C++ Build Tools with the Windows SDK, and
+[NASM](https://www.nasm.us/). Add NASM's installation directory (normally
+`C:\Program Files\NASM`) to `PATH` and restart PowerShell. The TLS dependency
+`aws-lc-sys` compiles x64 assembly with NASM in both debug and release builds.
 From the repository root in PowerShell:
 
 ```powershell
+nasm -v
 rustup target add x86_64-pc-windows-msvc
 cargo fmt --all -- --check
 cargo clippy --locked --target x86_64-pc-windows-msvc --all-targets -- -D warnings
@@ -33,8 +37,9 @@ the Windows GUI subsystem; `--search` attaches to the parent console when
 available and supports redirected output without creating a window.
 
 The `Desktop builds` GitHub Actions workflow runs formatting, Clippy, and the
-full test suite on Windows and macOS. It also builds both release packages and
-tests diagnostic CLI error reporting from the extracted Windows ZIP without
+full test suite on Windows and macOS. The Windows job installs NASM and checks
+that it is on `PATH` before compiling dependencies. It also builds both release
+packages and tests diagnostic CLI error reporting from the extracted Windows ZIP without
 making a search request. Artifact names are `Torrent-windows-x64` and
 `Torrent-macos-arm64`; each contains a ZIP and checksum. The workflow has read-only
 repository permissions and does not create or publish GitHub Releases.
