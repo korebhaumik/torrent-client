@@ -1,5 +1,13 @@
 use eframe::egui::*;
 
+pub(crate) fn command_shortcut(ctx: &Context, key: Key) -> String {
+    if ctx.os().is_mac() && key == Key::Enter {
+        format!("{}↵", ctx.format_modifiers(Modifiers::COMMAND))
+    } else {
+        ctx.format_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, key))
+    }
+}
+
 pub(crate) const BLUE: Color32 = Color32::from_rgb(76, 115, 236);
 pub(crate) const GREEN: Color32 = Color32::from_rgb(52, 211, 153);
 pub(crate) const YELLOW: Color32 = Color32::from_rgb(251, 191, 36);
@@ -748,6 +756,47 @@ pub(crate) fn dialog_header(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shortcut_labels_match_mac_and_windows_keyboard_input() {
+        use eframe::egui::os::OperatingSystem;
+
+        for os in [OperatingSystem::Mac, OperatingSystem::Windows] {
+            let ctx = Context::default();
+            ctx.set_os(os);
+            let modifiers = Modifiers {
+                command: true,
+                ctrl: os == OperatingSystem::Windows,
+                mac_cmd: os == OperatingSystem::Mac,
+                ..Default::default()
+            };
+            let _ = ctx.run(
+                RawInput {
+                    modifiers,
+                    events: vec![Event::Key {
+                        key: Key::K,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    }],
+                    ..Default::default()
+                },
+                |ctx| {
+                    let label = command_shortcut(ctx, Key::K);
+                    if os == OperatingSystem::Windows {
+                        assert_eq!(label, "Ctrl+K");
+                        assert_eq!(command_shortcut(ctx, Key::Enter), "Ctrl+Enter");
+                    } else {
+                        assert!(label.contains('⌘') || label.contains("Cmd"));
+                        assert!(!label.contains("Ctrl"));
+                        assert!(command_shortcut(ctx, Key::Enter).ends_with('↵'));
+                    }
+                    assert!(ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::K)));
+                },
+            );
+        }
+    }
 
     #[test]
     fn modal_header_and_controls_fit_small_windows() {

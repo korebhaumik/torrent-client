@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 use torrent_desktop::{
-    config::{Paths, Settings, atomic_json},
+    config::{Paths, Settings, atomic_json, atomic_write},
     engine::{Command, Engine, import_legacy, parse_magnet, parse_torrent_file},
     model::{self, Snapshot, Torrent},
     search::{clean_html, size_bytes, tokens},
@@ -109,6 +109,55 @@ fn atomic_state_and_legacy_import_preserve_original() {
     assert!(paths.lock().is_err());
     drop(lock);
     assert!(paths.lock().is_ok());
+}
+
+#[test]
+fn atomic_writes_replace_existing_settings_and_metadata_in_unicode_paths() {
+    let temp = tempfile::tempdir().unwrap();
+    let paths = Paths {
+        data: temp.path().join("Torrent state 日本語 & spaces"),
+    };
+    let mut options = settings(&temp.path().join("downloads"));
+    paths.save_settings(&options).unwrap();
+    options.light = true;
+    paths.save_settings(&options).unwrap();
+    assert!(paths.load_settings().unwrap().light);
+    let metadata = paths.metadata(&"a".repeat(40));
+    atomic_write(&metadata, b"old metadata").unwrap();
+    atomic_write(&metadata, b"new metadata").unwrap();
+    assert_eq!(fs::read(&metadata).unwrap(), b"new metadata");
+    assert!(!metadata.with_extension("tmp").exists());
+}
+
+#[test]
+fn failed_atomic_replace_preserves_destination_and_cleans_temporary_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let destination = temp.path().join("settings.json");
+    fs::create_dir(&destination).unwrap();
+    let original = destination.join("keep.txt");
+    fs::write(&original, b"preserve me").unwrap();
+    assert!(atomic_write(&destination, b"new data").is_err());
+    assert_eq!(fs::read(original).unwrap(), b"preserve me");
+    assert!(!destination.with_extension("tmp").exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn locked_windows_destination_is_preserved_when_saving_fails() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("settings.json");
+    atomic_write(&path, b"original").unwrap();
+    let locked = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&path)
+        .unwrap();
+    assert!(atomic_write(&path, b"replacement").is_err());
+    drop(locked);
+    assert_eq!(fs::read(&path).unwrap(), b"original");
+    assert!(!path.with_extension("tmp").exists());
 }
 
 #[test]

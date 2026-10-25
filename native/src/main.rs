@@ -1,6 +1,22 @@
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 use torrent_desktop::{app::TorrentApp, config::Paths, search::SearchClient};
 
 fn main() {
+    #[cfg(target_os = "windows")]
+    if std::env::args().any(|arg| arg == "--search") {
+        // Release builds are GUI applications. Attach only for the diagnostic
+        // CLI so Explorer launches never create a console window. Redirected
+        // handles remain usable even when there is no parent console.
+        unsafe {
+            windows_sys::Win32::System::Console::AttachConsole(
+                windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS,
+            );
+        }
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
@@ -41,6 +57,10 @@ fn run() -> anyhow::Result<()> {
     let paths = Paths::discover()?;
     let lock = paths.lock()?;
     let settings = paths.load_settings()?;
+    // Keep framework window/UI persistence isolated with an explicitly selected
+    // session. Normal launches retain eframe's existing default storage path.
+    let persistence_path =
+        std::env::var_os("TORRENT_DATA_DIR").map(|_| paths.data.join("egui.ron"));
     let viewport = eframe::egui::ViewportBuilder::default()
         .with_title("Torrent")
         .with_icon(eframe::icon_data::from_png_bytes(include_bytes!(
@@ -53,6 +73,7 @@ fn run() -> anyhow::Result<()> {
         eframe::NativeOptions {
             viewport,
             renderer: eframe::Renderer::Glow,
+            persistence_path,
             ..Default::default()
         },
         Box::new(move |cc| {
