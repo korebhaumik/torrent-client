@@ -1,0 +1,6 @@
+simulation: torrent-discovery
+routing: path
+mocks:
+  - name: search-providers
+    routeKey: search
+    path: postman/mocks/search-providers
