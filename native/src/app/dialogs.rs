@@ -22,13 +22,9 @@ impl TorrentApp {
                     self.add_open = false;
                 }
                 ui.add_space(12.0);
-                Frame::new()
-                    .fill(p.bg)
-                    .corner_radius(7)
-                    .inner_margin(4)
-                    .show(ui, |ui| {
-                        let width = (ui.available_width() - 4.0) / 2.0;
-                        ui.spacing_mut().item_spacing.x = 4.0;
+                track(p).show(ui, |ui| {
+                        let width = (ui.available_width() - 2.0) / 2.0;
+                        ui.spacing_mut().item_spacing.x = 2.0;
                         ui.add_enabled_ui(!self.adding, |ui| {
                             ui.horizontal(|ui| {
                                 if segment(
@@ -66,32 +62,47 @@ impl TorrentApp {
                         response.widget_info(|| {
                             WidgetInfo::labeled(WidgetType::Button, true, "Choose a torrent file")
                         });
-                        ui.painter().rect(
+                        let active = hovering || response.hovered();
+                        ui.painter().rect_filled(
                             zone,
-                            8,
-                            if hovering {
-                                mix(p.bg, BLUE, 0.08)
+                            12,
+                            if active {
+                                p.tint(BLUE, 0.06)
+                            } else if p.light {
+                                p.panel2
                             } else {
                                 p.bg
                             },
+                        );
+                        dashed_outline(
+                            ui.painter(),
+                            zone.shrink(0.5),
+                            12.0,
                             Stroke::new(
-                                1.0_f32,
-                                if hovering || response.hovered() {
+                                1.2_f32,
+                                if active {
                                     BLUE
                                 } else {
-                                    p.border
+                                    mix(p.border, p.muted, 0.35)
                                 },
                             ),
-                            StrokeKind::Inside,
                         );
+                        if response.has_focus() {
+                            ui.painter().rect_stroke(
+                                zone.expand(2.0),
+                                14,
+                                Stroke::new(2.0_f32, BLUE.gamma_multiply(0.7)),
+                                StrokeKind::Outside,
+                            );
+                        }
                         let badge = Rect::from_center_size(
                             zone.center() - vec2(0.0, 35.0),
-                            vec2(34.0, 34.0),
+                            vec2(36.0, 36.0),
                         );
-                        ui.painter().rect_filled(badge, 7, p.panel2);
+                        ui.painter().rect_filled(badge, 10, p.tint(BLUE, 0.12));
                         icon(
                             ui.painter(),
-                            badge.shrink(8.0),
+                            badge.shrink(9.0),
                             if self.selected_file.is_some() {
                                 Glyph::File
                             } else {
@@ -190,25 +201,24 @@ impl TorrentApp {
                 if let Some(error) = &self.add_error {
                     ui.add_space(4.0);
                     Frame::new()
-                        .fill(mix(p.panel, RED, 0.07))
-                        .stroke(Stroke::new(1.0_f32, mix(p.border, RED, 0.25)))
-                        .corner_radius(7)
+                        .fill(p.tint(RED, 0.07))
+                        .stroke(Stroke::new(1.0_f32, p.tint(RED, 0.3)))
+                        .corner_radius(10)
                         .inner_margin(12)
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             ui.horizontal(|ui| {
                                 let (r, _) =
                                     ui.allocate_exact_size(vec2(15.0, 15.0), Sense::hover());
-                                icon(ui.painter(), r, Glyph::Warning, RED);
+                                icon(ui.painter(), r, Glyph::Warning, p.ink(RED));
                                 ui.add(
-                                    Label::new(RichText::new(error).size(12.0).color(RED)).wrap(),
+                                    Label::new(RichText::new(error).size(12.0).color(p.ink(RED)))
+                                        .wrap(),
                                 );
                             });
                         });
                 }
-                ui.add_space(16.0);
-                divider(ui, p);
-                ui.add_space(6.0);
+                ui.add_space(18.0);
                 let valid = if self.file_tab {
                     self.selected_file.is_some()
                 } else {
@@ -219,11 +229,12 @@ impl TorrentApp {
                         ui.spinner();
                         muted(ui, "Adding torrent…", p);
                     } else {
-                        small(
-                            ui,
+                        // The monospace face carries the ↵ glyph on macOS.
+                        ui.label(mono(
                             format!("{} to add", command_shortcut(ui.ctx(), Key::Enter)),
-                            p,
-                        );
+                            10.5,
+                            p.faint,
+                        ));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_enabled_ui(valid && !self.adding, |ui| {
@@ -313,39 +324,37 @@ impl TorrentApp {
                 ) {
                     self.deleting = None;
                 }
-                ui.add_space(12.0);
-                card(p).fill(p.bg).show(ui, |ui| {
+                ui.add_space(14.0);
+                inset(p).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     clipped_text(ui, &t.name, 13.0, p.text, 2, 34.0);
-                    ui.horizontal(|ui| {
-                        small(ui, bytes(t.size as f64), p);
-                        small(
-                            ui,
-                            format!(
-                                "{} {}",
-                                t.files.len(),
-                                if t.files.len() == 1 { "file" } else { "files" }
-                            ),
-                            p,
-                        );
-                    });
+                    small(
+                        ui,
+                        format!(
+                            "{}  ·  {} {}",
+                            bytes(t.size as f64),
+                            t.files.len(),
+                            if t.files.len() == 1 { "file" } else { "files" }
+                        ),
+                        p,
+                    );
                 });
                 ui.add_space(8.0);
                 Frame::new()
                     .fill(if self.delete_files {
-                        mix(p.panel, RED, 0.05)
+                        p.tint(RED, 0.06)
                     } else {
-                        p.panel2
+                        p.panel
                     })
                     .stroke(Stroke::new(
                         1.0_f32,
                         if self.delete_files {
-                            mix(p.border, RED, 0.35)
+                            p.tint(RED, 0.4)
                         } else {
                             p.border
                         },
                     ))
-                    .corner_radius(8)
+                    .corner_radius(10)
                     .inner_margin(14)
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
@@ -368,9 +377,7 @@ impl TorrentApp {
                             p,
                         );
                     });
-                ui.add_space(16.0);
-                divider(ui, p);
-                ui.add_space(6.0);
+                ui.add_space(18.0);
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if action(
@@ -428,76 +435,79 @@ impl TorrentApp {
                     .max_height((ctx.content_rect().height() - 216.0).max(240.0))
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        ui.add_space(16.0);
-                        small(ui, "APPEARANCE", p);
-                        ui.horizontal(|ui| {
-                            let width = (ui.available_width() - 10.0) / 2.0;
-                            if segment(
-                                ui,
-                                "Dark",
-                                !self.settings.light,
-                                Some(Glyph::Moon),
-                                p,
-                                Some(width),
-                            ) {
-                                self.settings.light = false;
-                                self.persist_settings();
-                            }
-                            if segment(
-                                ui,
-                                "Light",
-                                self.settings.light,
-                                Some(Glyph::Sun),
-                                p,
-                                Some(width),
-                            ) {
-                                self.settings.light = true;
-                                self.persist_settings();
-                            }
-                        });
-                        ui.add_space(12.0);
-                        divider(ui, p);
-                        ui.add_space(10.0);
-                        ui.label(RichText::new("Download location").size(13.0).strong());
-                        muted(ui, "Choose where new torrents save their files.", p);
-                        card(p).fill(p.bg).inner_margin(12).show(ui, |ui| {
-                            ui.set_width(ui.available_width());
+                        ui.add_space(18.0);
+                        eyebrow(ui, "Appearance", p);
+                        track(p).show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
+                            let width = (ui.available_width() - 2.0) / 2.0;
                             ui.horizontal(|ui| {
-                                let width = (ui.available_width() - 112.0).max(120.0);
-                                ui.add_sized(
-                                    [width, 34.0],
-                                    Label::new(mono(
-                                        self.settings.download_dir.display().to_string(),
-                                        11.0,
-                                        p.text,
-                                    ))
-                                    .truncate(),
-                                )
-                                .on_hover_text(self.settings.download_dir.display().to_string());
-                                if secondary(ui, "Choose…", Some(Glyph::Folder), p).clicked()
-                                    && let Some(path) = rfd::FileDialog::new()
-                                        .set_directory(&self.settings.download_dir)
-                                        .pick_folder()
-                                {
-                                    self.engine.send(Command::SetFolder(path.clone()));
-                                    self.settings.download_dir = path;
+                                if segment(
+                                    ui,
+                                    "Dark",
+                                    !self.settings.light,
+                                    Some(Glyph::Moon),
+                                    p,
+                                    Some(width),
+                                ) {
+                                    self.settings.light = false;
+                                    self.persist_settings();
+                                }
+                                if segment(
+                                    ui,
+                                    "Light",
+                                    self.settings.light,
+                                    Some(Glyph::Sun),
+                                    p,
+                                    Some(width),
+                                ) {
+                                    self.settings.light = true;
                                     self.persist_settings();
                                 }
                             });
                         });
+                        ui.add_space(14.0);
+                        divider(ui, p);
+                        ui.add_space(12.0);
+                        ui.label(display("Download location", 14.0).color(p.text));
+                        muted(ui, "Choose where new torrents save their files.", p);
+                        inset(p)
+                            .inner_margin(Margin::symmetric(12, 8))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.horizontal(|ui| {
+                                    let width = (ui.available_width() - 112.0).max(120.0);
+                                    ui.add_sized(
+                                        [width, 34.0],
+                                        Label::new(mono(
+                                            self.settings.download_dir.display().to_string(),
+                                            11.0,
+                                            p.text,
+                                        ))
+                                        .truncate(),
+                                    )
+                                    .on_hover_text(
+                                        self.settings.download_dir.display().to_string(),
+                                    );
+                                    if secondary(ui, "Choose…", Some(Glyph::Folder), p).clicked()
+                                        && let Some(path) = rfd::FileDialog::new()
+                                            .set_directory(&self.settings.download_dir)
+                                            .pick_folder()
+                                    {
+                                        self.engine.send(Command::SetFolder(path.clone()));
+                                        self.settings.download_dir = path;
+                                        self.persist_settings();
+                                    }
+                                });
+                            });
                         muted(
                             ui,
                             "Existing torrents keep their current download location.",
                             p,
                         );
-                        ui.add_space(12.0);
+                        ui.add_space(14.0);
                         divider(ui, p);
-                        ui.add_space(10.0);
-                        ui.label(
-                            RichText::new("Bring your library along")
-                                .size(13.0)
-                                .strong(),
-                        );
+                        ui.add_space(12.0);
+                        ui.label(display("Bring your library along", 14.0).color(p.text));
                         muted(
                             ui,
                             "Import saved magnets from your previous WebTorrent session.",
@@ -531,11 +541,13 @@ impl TorrentApp {
                             );
                         });
                     });
-                ui.add_space(16.0);
+                ui.add_space(14.0);
                 divider(ui, p);
-                ui.add_space(6.0);
+                ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    small(ui, "TORRENT 2.1", p);
+                    let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                    brand_mark(ui.painter(), r, p.light);
+                    ui.label(RichText::new("Torrent 2.1").size(11.5).color(p.faint));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if primary(ui, "Done").clicked() {
                             self.settings_open = false;
