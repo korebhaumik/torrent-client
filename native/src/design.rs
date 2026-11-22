@@ -11,9 +11,8 @@ pub(crate) fn command_shortcut(ctx: &Context, key: Key) -> String {
 
 /// Primary accent, used for actions, focus, and downloading.
 pub(crate) const BLUE: Color32 = Color32::from_rgb(92, 104, 255);
-/// Start of the brand gradient; `BRAND_END` is its other end.
+/// Secondary accent for peers and the swarm.
 pub(crate) const VIOLET: Color32 = Color32::from_rgb(124, 92, 255);
-const BRAND_END: Color32 = Color32::from_rgb(44, 110, 245);
 pub(crate) const GREEN: Color32 = Color32::from_rgb(38, 201, 148);
 pub(crate) const YELLOW: Color32 = Color32::from_rgb(245, 180, 64);
 pub(crate) const RED: Color32 = Color32::from_rgb(240, 98, 108);
@@ -1002,57 +1001,103 @@ pub(crate) fn dashed_outline(painter: &Painter, r: Rect, radius: f32, stroke: St
 }
 
 /// The app mark: the same artwork as `assets/brand.svg` and `make-icon.swift`.
-pub(crate) fn brand_mark(p: &Painter, r: Rect) {
-    let at = |x: f32, y: f32| {
-        r.min
-            + vec2(
-                (x - 64.0) / 896.0 * r.width(),
-                (y - 64.0) / 896.0 * r.height(),
-            )
-    };
-    // Rounded tile as a triangle fan whose vertex colors follow the diagonal.
-    let radius = r.width() * 200.0 / 896.0;
-    let mut outline = Vec::with_capacity(40);
-    for (corner, start) in [
-        (pos2(r.right() - radius, r.top() + radius), -90.0_f32),
-        (pos2(r.right() - radius, r.bottom() - radius), 0.0),
-        (pos2(r.left() + radius, r.bottom() - radius), 90.0),
-        (pos2(r.left() + radius, r.top() + radius), 180.0),
-    ] {
-        for step in 0..=9 {
-            let angle = (start + step as f32 * 10.0).to_radians();
-            outline.push(corner + vec2(angle.cos(), angle.sin()) * radius);
-        }
-    }
-    let (from, to) = (at(160.0, 96.0), at(864.0, 928.0));
-    let axis = to - from;
-    let shade = |point: Pos2| {
+/// The SVG's 64-unit canvas is cropped to 8..56 so the drop fills `r`. On light
+/// themes the arrow cutout is white so it stands out against the light canvas.
+pub(crate) fn brand_mark(p: &Painter, r: Rect, light: bool) {
+    const SKY: Color32 = Color32::from_rgb(56, 189, 248);
+    const INDIGO: Color32 = Color32::from_rgb(99, 102, 241);
+    const PURPLE: Color32 = Color32::from_rgb(139, 92, 246);
+    let at =
+        |x: f32, y: f32| r.min + vec2((x - 8.0) / 48.0 * r.width(), (y - 8.0) / 48.0 * r.height());
+    // Interpolates a gradient along `from -> to`, like an SVG linear gradient.
+    let shade = |point: Pos2, from: Pos2, to: Pos2, stops: &[(f32, Color32)]| {
+        let axis = to - from;
         let t = ((point - from).dot(axis) / axis.length_sq()).clamp(0.0, 1.0);
-        mix(VIOLET, BRAND_END, t)
+        stops
+            .windows(2)
+            .find(|w| t <= w[1].0)
+            .map(|w| mix(w[0].1, w[1].1, (t - w[0].0) / (w[1].0 - w[0].0)))
+            .unwrap_or(stops[stops.len() - 1].1)
     };
-    let mut mesh = Mesh::default();
-    mesh.colored_vertex(r.center(), shade(r.center()));
-    for point in &outline {
-        mesh.colored_vertex(*point, shade(*point));
-    }
-    let n = outline.len() as u32;
-    for i in 0..n {
-        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
-    }
-    p.add(mesh);
-    let line = |points: &[(f32, f32)], width: f32| {
-        let width = width / 896.0 * r.width();
-        let points: Vec<Pos2> = points.iter().map(|&(x, y)| at(x, y)).collect();
-        // Round caps and joins, matching the SVG stroke style.
-        for point in &points {
-            p.circle_filled(*point, width / 2.0, Color32::WHITE);
+    let fan = |mesh: &mut Mesh, outline: &[Pos2], color: &dyn Fn(Pos2) -> Color32| {
+        let center =
+            outline.iter().fold(Vec2::ZERO, |sum, p| sum + p.to_vec2()) / outline.len() as f32;
+        let base = mesh.vertices.len() as u32;
+        mesh.colored_vertex(center.to_pos2(), color(center.to_pos2()));
+        for point in outline {
+            mesh.colored_vertex(*point, color(*point));
         }
-        p.add(Shape::line(points, Stroke::new(width, Color32::WHITE)));
+        let n = outline.len() as u32;
+        for i in 0..n {
+            mesh.add_triangle(base, base + 1 + i, base + 1 + (i + 1) % n);
+        }
     };
-    line(&[(300.0, 270.0), (724.0, 270.0)], 64.0);
-    line(&[(512.0, 270.0), (512.0, 660.0)], 64.0);
-    line(&[(396.0, 556.0), (512.0, 672.0), (628.0, 556.0)], 64.0);
-    line(&[(330.0, 790.0), (694.0, 790.0)], 48.0);
+
+    // Outer drop shield: four cubic segments, which together form a convex outline.
+    let segments = [
+        [(32.0, 10.0), (45.0, 10.0), (52.0, 20.0), (52.0, 34.0)],
+        [(52.0, 34.0), (52.0, 46.0), (43.0, 54.0), (32.0, 54.0)],
+        [(32.0, 54.0), (21.0, 54.0), (12.0, 46.0), (12.0, 34.0)],
+        [(12.0, 34.0), (12.0, 20.0), (19.0, 10.0), (32.0, 10.0)],
+    ];
+    let mut outline = Vec::with_capacity(64);
+    for [a, b, c, d] in segments {
+        for step in 0..16 {
+            let t = step as f32 / 16.0;
+            let q = 1.0 - t;
+            let x =
+                a.0 * q * q * q + 3.0 * b.0 * q * q * t + 3.0 * c.0 * q * t * t + d.0 * t * t * t;
+            let y =
+                a.1 * q * q * q + 3.0 * b.1 * q * q * t + 3.0 * c.1 * q * t * t + d.1 * t * t * t;
+            outline.push(at(x, y));
+        }
+    }
+    let mut mesh = Mesh::default();
+    let (from, to) = (at(12.0, 10.0), at(52.0, 54.0));
+    fan(&mut mesh, &outline, &|point| {
+        shade(point, from, to, &[(0.0, SKY), (0.5, INDIGO), (1.0, PURPLE)])
+    });
+
+    // Arrow cutout, then the inner highlight arrow at 90% opacity. Each arrow
+    // is drawn as its convex head plus its rectangular stem.
+    let arrow = |mesh: &mut Mesh,
+                 head: [(f32, f32); 3],
+                 stem: [(f32, f32); 2],
+                 color: &dyn Fn(Pos2) -> Color32| {
+        fan(mesh, &head.map(|(x, y)| at(x, y)), color);
+        let [(x0, y0), (x1, y1)] = stem;
+        fan(
+            mesh,
+            &[at(x0, y0), at(x1, y0), at(x1, y1), at(x0, y1)],
+            color,
+        );
+    };
+    let cutout = if light {
+        Color32::WHITE
+    } else {
+        Color32::from_rgb(14, 15, 20)
+    };
+    arrow(
+        &mut mesh,
+        [(32.0, 20.0), (44.0, 33.0), (20.0, 33.0)],
+        [(27.0, 33.0), (37.0, 44.0)],
+        &|_| cutout,
+    );
+    let (from, to) = (at(25.0, 40.0), at(39.0, 25.0));
+    arrow(
+        &mut mesh,
+        [(32.0, 25.0), (39.0, 33.0), (25.0, 33.0)],
+        [(30.0, 33.0), (34.0, 40.0)],
+        &|point| {
+            // Blend over the cutout so the result matches 90% opacity exactly.
+            mix(
+                cutout,
+                shade(point, from, to, &[(0.0, INDIGO), (1.0, SKY)]),
+                0.9,
+            )
+        },
+    );
+    p.add(mesh);
 }
 
 pub(crate) fn status_color(t: &crate::model::Torrent) -> Color32 {
