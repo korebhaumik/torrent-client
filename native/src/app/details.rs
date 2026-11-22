@@ -22,18 +22,30 @@ impl TorrentApp {
                 Frame::new()
                     .fill(p.panel)
                     .stroke(Stroke::new(1.0_f32, p.border))
+                    .corner_radius(CornerRadius {
+                        nw: 16,
+                        sw: 16,
+                        ne: 0,
+                        se: 0,
+                    })
+                    .shadow(Shadow {
+                        offset: [-8, 0],
+                        blur: 40,
+                        spread: 0,
+                        color: Color32::from_black_alpha(if p.light { 30 } else { 90 }),
+                    })
                     .inner_margin(24),
             )
             .show(ctx, |ui| {
                 ui.set_width(width - 48.0);
                 ui.set_height(ctx.content_rect().height() - 48.0);
                 ui.horizontal(|ui| {
-                    small(
+                    eyebrow(
                         ui,
                         if torrent.is_some() {
-                            "TORRENT DETAILS"
+                            "Torrent details"
                         } else {
-                            "DISCOVERY DETAILS"
+                            "Discovery details"
                         },
                         p,
                     );
@@ -51,12 +63,11 @@ impl TorrentApp {
                     .unwrap_or("");
                 let mut title_job = text::LayoutJob::simple(
                     title.into(),
-                    FontId::proportional(18.0),
+                    display_font(19.0),
                     p.text,
                     ui.available_width(),
                 );
                 title_job.wrap.max_rows = 3;
-                title_job.wrap.break_anywhere = true;
                 let title_galley = ui.fonts_mut(|fonts| fonts.layout_job(title_job));
                 let (title_rect, title_response) = ui.allocate_exact_size(
                     vec2(ui.available_width(), title_galley.size().y),
@@ -64,12 +75,13 @@ impl TorrentApp {
                 );
                 ui.painter().galley(title_rect.min, title_galley, p.text);
                 title_response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, title));
+                ui.add_space(2.0);
                 if let Some(t) = &torrent {
-                    badge(ui, t.status(), status_color(t), p);
+                    status_pill(ui, t.status(), status_color(t), p);
                 } else if let Some(r) = &result {
                     badge(ui, source_name(&r.source), BLUE, p);
                 }
-                ui.add_space(12.0);
+                ui.add_space(14.0);
                 divider(ui, p);
                 let body_height =
                     (ctx.content_rect().bottom() - ui.cursor().top() - 100.0).max(120.0);
@@ -80,26 +92,29 @@ impl TorrentApp {
                     .show(ui, |ui| {
                         ui.add_space(10.0);
                         if let Some(t) = &torrent {
-                            card(p).fill(p.bg).show(ui, |ui| {
+                            inset(p).show(ui, |ui| {
                                 ui.set_width(ui.available_width());
-                                value_row(
-                                    ui,
-                                    &format!("{:.0}% completed", t.progress() * 100.0),
-                                    &format!("ETA {}", t.eta()),
-                                    p,
-                                );
-                                ui.add(
-                                    ProgressBar::new(t.progress())
-                                        .desired_height(7.0)
-                                        .fill(status_color(t))
-                                        .corner_radius(4),
-                                );
-                                ui.add_space(3.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        display(format!("{:.0}%", t.progress() * 100.0), 26.0)
+                                            .color(p.text),
+                                    );
+                                    ui.label(RichText::new("completed").size(12.0).color(p.muted));
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        ui.label(
+                                            RichText::new(format!("ETA {}", t.eta()))
+                                                .size(12.0)
+                                                .color(p.muted),
+                                        );
+                                    });
+                                });
+                                progress(ui, t.progress(), status_color(t), 8.0, p);
+                                ui.add_space(4.0);
                                 value_row(ui, "Download", &speed(t.down_speed), p);
                                 value_row(ui, "Upload", &speed(t.up_speed), p);
                             });
                             ui.add_space(10.0);
-                            small(ui, "OVERVIEW", p);
+                            eyebrow(ui, "Overview", p);
                             card(p).show(ui, |ui| {
                                 ui.set_width(ui.available_width());
                                 value_row(ui, "Total size", &bytes(t.size as f64), p);
@@ -118,12 +133,12 @@ impl TorrentApp {
                             });
                             if let Some(error) = &t.error {
                                 ui.add_space(5.0);
-                                ui.colored_label(RED, error);
+                                ui.colored_label(p.ink(RED), error);
                             }
                             ui.add_space(10.0);
                             self.identifiers(ui, &t.hash, &t.magnet, p);
                             ui.add_space(10.0);
-                            small(ui, format!("FILES · {}", t.files.len()), p);
+                            eyebrow(ui, &format!("Files · {}", t.files.len()), p);
                             if t.files.is_empty() {
                                 muted(
                                     ui,
@@ -132,7 +147,7 @@ impl TorrentApp {
                                 );
                             }
                             for file in &t.files {
-                                card(p).fill(p.bg).show(ui, |ui| {
+                                inset(p).inner_margin(12).show(ui, |ui| {
                                     ui.set_width(ui.available_width());
                                     clipped_text(ui, &file.name, 12.5, p.text, 2, 32.0);
                                     value_row(
@@ -141,17 +156,12 @@ impl TorrentApp {
                                         &format!("{} downloaded", bytes(file.completed as f64)),
                                         p,
                                     );
-                                    let progress = if file.size == 0 {
+                                    let fraction = if file.size == 0 {
                                         0.0
                                     } else {
                                         file.completed as f32 / file.size as f32
                                     };
-                                    ui.add(
-                                        ProgressBar::new(progress)
-                                            .desired_height(4.0)
-                                            .fill(BLUE)
-                                            .corner_radius(2),
-                                    );
+                                    progress(ui, fraction, BLUE, 4.0, p);
                                     ui.horizontal(|ui| {
                                         ui.add_enabled_ui(file.path.exists(), |ui| {
                                             if ghost(ui, "Open file", Some(Glyph::External), p)
@@ -181,7 +191,7 @@ impl TorrentApp {
                                 });
                             }
                         } else if let Some(r) = &result {
-                            card(p).fill(p.bg).show(ui, |ui| {
+                            inset(p).show(ui, |ui| {
                                 ui.set_width(ui.available_width());
                                 value_row(ui, "Category", &r.category, p);
                                 value_row(ui, "Size", &bytes(r.size as f64), p);
@@ -190,7 +200,7 @@ impl TorrentApp {
                             });
                             if !r.description.is_empty() {
                                 ui.add_space(10.0);
-                                small(ui, "ABOUT THIS TORRENT", p);
+                                eyebrow(ui, "About this torrent", p);
                                 ui.add(
                                     Label::new(
                                         RichText::new(&r.description).size(12.5).color(p.muted),
@@ -287,39 +297,41 @@ impl TorrentApp {
     }
 
     fn identifiers(&mut self, ui: &mut Ui, hash: &str, magnet: &str, p: Palette) {
-        small(ui, "IDENTIFIERS", p);
+        eyebrow(ui, "Identifiers", p);
         for (label, text) in [("Infohash", hash), ("Magnet link", magnet)] {
-            card(p).fill(p.bg).inner_margin(12).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                small(ui, label, p);
-                ui.horizontal(|ui| {
-                    let width = (ui.available_width() - 42.0).max(50.0);
-                    ui.allocate_ui_with_layout(
-                        vec2(width, 32.0),
-                        Layout::left_to_right(Align::Center),
-                        |ui| {
-                            ui.set_min_size(vec2(width, 32.0));
-                            ui.add(
-                                Label::new(mono(text, 11.0, p.text))
-                                    .halign(Align::Min)
-                                    .truncate(),
-                            )
-                            .on_hover_text(text);
-                        },
-                    );
-                    if icon_button(
-                        ui,
-                        Glyph::Copy,
-                        &format!("Copy {}", label.to_lowercase()),
-                        p,
-                    )
-                    .clicked()
-                    {
-                        ui.ctx().copy_text(text.into());
-                        self.notice(format!("{label} copied to clipboard"), false);
-                    }
+            inset(p)
+                .inner_margin(Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    small(ui, label, p);
+                    ui.horizontal(|ui| {
+                        let width = (ui.available_width() - 42.0).max(50.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(width, 32.0),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                ui.set_min_size(vec2(width, 32.0));
+                                ui.add(
+                                    Label::new(mono(text, 11.0, p.text))
+                                        .halign(Align::Min)
+                                        .truncate(),
+                                )
+                                .on_hover_text(text);
+                            },
+                        );
+                        if icon_button(
+                            ui,
+                            Glyph::Copy,
+                            &format!("Copy {}", label.to_lowercase()),
+                            p,
+                        )
+                        .clicked()
+                        {
+                            ui.ctx().copy_text(text.into());
+                            self.notice(format!("{label} copied to clipboard"), false);
+                        }
+                    });
                 });
-            });
         }
     }
 }

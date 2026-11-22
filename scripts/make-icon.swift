@@ -1,8 +1,15 @@
 import AppKit
 import Foundation
 
+// Draws the same artwork as native/assets/brand.svg and `brand_mark` in
+// native/src/design.rs. Coordinates use the SVG's 1024-unit, y-down space.
 let folder = "native/assets/Torrent.iconset"
 try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+
+func color(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> NSColor {
+    NSColor(calibratedRed: r / 255, green: g / 255, blue: b / 255, alpha: a)
+}
+
 for size in [16, 32, 64, 128, 256, 512, 1024] {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size,
         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
@@ -12,23 +19,37 @@ for size in [16, 32, 64, 128, 256, 512, 1024] {
     let scale = CGFloat(size) / 1024
     let transform = NSAffineTransform()
     transform.scale(by: scale)
+    transform.translateX(by: 0, yBy: 1024)
+    transform.scaleX(by: 1, yBy: -1)
     transform.concat()
-    NSColor(calibratedRed: 76/255, green: 115/255, blue: 236/255, alpha: 1).setFill()
-    NSBezierPath(roundedRect: NSRect(x: 64, y: 64, width: 896, height: 896), xRadius: 200, yRadius: 200).fill()
-    let path = NSBezierPath()
-    path.move(to: NSPoint(x: 280, y: 390))
-    path.line(to: NSPoint(x: 535, y: 645))
-    path.curve(to: NSPoint(x: 715, y: 465), controlPoint1: NSPoint(x: 710, y: 820), controlPoint2: NSPoint(x: 890, y: 640))
-    path.line(to: NSPoint(x: 460, y: 210))
-    path.lineWidth = 64
-    path.lineCapStyle = .round
-    NSColor.white.setStroke()
-    path.stroke()
-    let bars = NSBezierPath()
-    bars.move(to: NSPoint(x: 400, y: 510)); bars.line(to: NSPoint(x: 493, y: 417))
-    bars.move(to: NSPoint(x: 580, y: 330)); bars.line(to: NSPoint(x: 673, y: 423))
-    bars.lineWidth = 24; bars.stroke()
+
+    let tile = NSBezierPath(roundedRect: NSRect(x: 64, y: 64, width: 896, height: 896), xRadius: 200, yRadius: 200)
+    NSGraphicsContext.saveGraphicsState()
+    tile.addClip()
+    NSGradient(starting: color(124, 92, 255), ending: color(44, 110, 245))!
+        .draw(from: NSPoint(x: 160, y: 96), to: NSPoint(x: 864, y: 928),
+              options: [.drawsBeforeStartingLocation, .drawsAfterEndingLocation])
+    NSGradient(starting: color(255, 255, 255, 0.16), ending: color(255, 255, 255, 0))!
+        .draw(from: NSPoint(x: 512, y: 64), to: NSPoint(x: 512, y: 560), options: [.drawsBeforeStartingLocation])
     NSGraphicsContext.restoreGraphicsState()
+
+    NSColor.white.setStroke()
+    func stroke(_ points: [[(CGFloat, CGFloat)]], _ width: CGFloat) {
+        let path = NSBezierPath()
+        for line in points {
+            path.move(to: NSPoint(x: line[0].0, y: line[0].1))
+            for p in line.dropFirst() { path.line(to: NSPoint(x: p.0, y: p.1)) }
+        }
+        path.lineWidth = width
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.stroke()
+    }
+    // A "T" whose stem becomes a download arrow, landing on a baseline.
+    stroke([[(300, 270), (724, 270)], [(512, 270), (512, 660)], [(396, 556), (512, 672), (628, 556)]], 64)
+    stroke([[(330, 790), (694, 790)]], 48)
+    NSGraphicsContext.restoreGraphicsState()
+
     let data = rep.representation(using: .png, properties: [:])!
     if size == 512 { try data.write(to: URL(fileURLWithPath: "native/assets/logo-preview.png")) }
     let names: [String]

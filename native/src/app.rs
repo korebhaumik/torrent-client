@@ -9,12 +9,24 @@ use crate::{
 };
 use eframe::egui::*;
 use std::{
+    collections::VecDeque,
     path::PathBuf,
     sync::mpsc,
     time::{Duration, Instant},
 };
 
 use crate::design::*;
+
+/// Seconds of transfer-rate history kept for the stat sparklines.
+const HISTORY_LEN: usize = 60;
+
+/// What the footer of a stat card shows.
+enum Trend<'a> {
+    /// Recent transfer rates, drawn as a sparkline.
+    Rates(&'a [f64]),
+    /// A fraction of a whole, drawn as a progress bar.
+    Share(f32),
+}
 
 pub struct TorrentApp {
     engine: Engine,
@@ -49,6 +61,8 @@ pub struct TorrentApp {
     search_rx: mpsc::Receiver<(u64, SearchResponse)>,
     search_id: u64,
     search_task: Option<tokio::task::JoinHandle<()>>,
+    history: VecDeque<(f64, f64)>,
+    history_sampled: Instant,
 }
 
 impl TorrentApp {
@@ -58,31 +72,7 @@ impl TorrentApp {
         settings: Settings,
         lock: std::fs::File,
     ) -> anyhow::Result<Self> {
-        let mut fonts = FontDefinitions::default();
-        for (name, path, family) in [
-            (
-                "SF",
-                "/System/Library/Fonts/SFNS.ttf",
-                FontFamily::Proportional,
-            ),
-            (
-                "SF Mono",
-                "/System/Library/Fonts/SFNSMono.ttf",
-                FontFamily::Monospace,
-            ),
-        ] {
-            if let Ok(data) = std::fs::read(path) {
-                fonts
-                    .font_data
-                    .insert(name.into(), FontData::from_owned(data).into());
-                fonts
-                    .families
-                    .get_mut(&family)
-                    .unwrap()
-                    .insert(0, name.into());
-            }
-        }
-        cc.egui_ctx.set_fonts(fonts);
+        cc.egui_ctx.set_fonts(fonts());
         let (search_tx, search_rx) = mpsc::channel();
         Ok(Self {
             engine: Engine::start(paths.clone(), settings.clone()),
@@ -117,6 +107,8 @@ impl TorrentApp {
             search_rx,
             search_id: 0,
             search_task: None,
+            history: VecDeque::with_capacity(HISTORY_LEN),
+            history_sampled: Instant::now(),
         })
     }
     fn open_add(&mut self) {
@@ -141,37 +133,54 @@ impl TorrentApp {
             },
             ..Default::default()
         };
-        style.visuals.panel_fill = p.panel;
-        style.visuals.window_fill = p.panel;
-        style.visuals.override_text_color = Some(p.text);
-        style.visuals.extreme_bg_color = p.bg;
-        style.visuals.faint_bg_color = p.panel2;
-        style.visuals.window_stroke = Stroke::new(1.0_f32, p.border);
-        style.visuals.window_corner_radius = CornerRadius::same(12);
-        style.visuals.selection.bg_fill = p.active;
-        style.visuals.selection.stroke = Stroke::new(1.0_f32, BLUE);
-        style.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, p.border);
-        style.visuals.widgets.inactive.bg_fill = p.panel2;
-        style.visuals.widgets.inactive.weak_bg_fill = p.panel2;
-        style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, p.border);
-        style.visuals.widgets.hovered.bg_fill = mix(p.panel2, BLUE, 0.07);
-        style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, mix(p.border, BLUE, 0.45));
-        style.visuals.widgets.active.bg_fill = p.active;
-        style.visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, BLUE);
+        let v = &mut style.visuals;
+        v.panel_fill = p.bg;
+        v.window_fill = p.panel;
+        v.override_text_color = Some(p.text);
+        v.extreme_bg_color = p.field;
+        v.text_edit_bg_color = Some(p.field);
+        v.faint_bg_color = p.panel2;
+        v.window_stroke = Stroke::new(1.0_f32, p.border);
+        v.window_corner_radius = CornerRadius::same(12);
+        v.menu_corner_radius = CornerRadius::same(10);
+        v.popup_shadow = Shadow {
+            offset: [0, 6],
+            blur: 18,
+            spread: 0,
+            color: Color32::from_black_alpha(if p.light { 28 } else { 80 }),
+        };
+        v.selection.bg_fill = BLUE.gamma_multiply(if p.light { 0.22 } else { 0.4 });
+        v.selection.stroke = Stroke::new(1.0_f32, BLUE);
+        v.text_cursor.stroke = Stroke::new(2.0_f32, BLUE);
+        v.hyperlink_color = p.ink(BLUE);
+        v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, p.border);
+        v.widgets.inactive.bg_fill = p.panel2;
+        v.widgets.inactive.weak_bg_fill = p.panel2;
+        v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, p.border);
+        v.widgets.hovered.bg_fill = mix(p.panel2, BLUE, 0.06);
+        v.widgets.hovered.weak_bg_fill = mix(p.panel2, BLUE, 0.06);
+        v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, mix(p.border, BLUE, 0.4));
+        v.widgets.active.bg_fill = p.active;
+        v.widgets.active.weak_bg_fill = p.active;
+        v.widgets.active.bg_stroke = Stroke::new(1.0_f32, BLUE);
         for widget in [
-            &mut style.visuals.widgets.inactive,
-            &mut style.visuals.widgets.hovered,
-            &mut style.visuals.widgets.active,
-            &mut style.visuals.widgets.noninteractive,
+            &mut v.widgets.inactive,
+            &mut v.widgets.hovered,
+            &mut v.widgets.active,
+            &mut v.widgets.noninteractive,
+            &mut v.widgets.open,
         ] {
-            widget.corner_radius = CornerRadius::same(6);
+            widget.corner_radius = CornerRadius::same(8);
+            widget.expansion = 0.0;
         }
         style.spacing.item_spacing = vec2(10.0, 8.0);
-        style.spacing.button_padding = vec2(12.0, 9.0);
+        style.spacing.button_padding = vec2(12.0, 8.0);
         style.spacing.interact_size = vec2(32.0, 20.0);
         style.spacing.window_margin = Margin::same(20);
-        style.spacing.scroll = style::ScrollStyle::solid();
-        style.spacing.scroll.bar_width = 5.0;
+        style.spacing.icon_width = 16.0;
+        style.spacing.icon_width_inner = 9.0;
+        style.spacing.scroll = style::ScrollStyle::thin();
+        style.spacing.scroll.bar_width = 6.0;
         style.animation_time = 0.13;
         style
             .text_styles
@@ -187,59 +196,59 @@ impl TorrentApp {
 
     fn sidebar(&mut self, ctx: &Context, snapshot: &Snapshot, p: Palette) {
         SidePanel::left("sidebar")
-            .exact_width(240.0)
+            .exact_width(232.0)
             .resizable(false)
-            .frame(Frame::new().fill(p.panel))
+            .show_separator_line(false)
+            .frame(Frame::new().fill(p.sidebar))
             .show(ctx, |ui| {
-                let (brand, _) = ui.allocate_exact_size(vec2(240.0, 64.0), Sense::hover());
+                let (brand, _) = ui.allocate_exact_size(vec2(232.0, 72.0), Sense::hover());
                 brand_mark(
                     ui.painter(),
-                    Rect::from_min_size(brand.min + vec2(20.0, 15.0), vec2(34.0, 34.0)),
+                    Rect::from_min_size(brand.min + vec2(22.0, 22.0), vec2(30.0, 30.0)),
                 );
                 ui.painter().text(
-                    brand.min + vec2(65.0, 25.0),
+                    brand.min + vec2(63.0, 38.0),
                     Align2::LEFT_CENTER,
                     "Torrent",
-                    FontId::proportional(16.0),
+                    display_font(18.0),
                     p.text,
                 );
+                let version =
+                    Rect::from_center_size(brand.min + vec2(196.0, 37.0), vec2(30.0, 18.0));
+                ui.painter()
+                    .rect_filled(version, 9, mix(p.sidebar, p.border, 0.7));
                 ui.painter().text(
-                    brand.min + vec2(65.0, 43.0),
-                    Align2::LEFT_CENTER,
-                    "DESKTOP CLIENT",
-                    FontId::monospace(8.5),
-                    p.muted,
-                );
-                ui.painter().text(
-                    brand.min + vec2(219.0, 31.0),
-                    Align2::RIGHT_CENTER,
+                    version.center(),
+                    Align2::CENTER_CENTER,
                     "2.1",
-                    FontId::monospace(10.0),
+                    FontId::proportional(10.0),
                     p.muted,
-                );
-                ui.painter().hline(
-                    brand.x_range(),
-                    brand.bottom(),
-                    Stroke::new(1.0_f32, p.border),
                 );
                 Frame::new()
-                    .inner_margin(Margin::symmetric(14, 16))
+                    .inner_margin(Margin::symmetric(12, 10))
                     .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 5.0;
-                        Frame::new()
-                            .inner_margin(Margin::symmetric(10, 4))
-                            .show(ui, |ui| {
-                                small(ui, "WORKSPACE", p);
-                            });
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        let section = |ui: &mut Ui, label: &str| {
+                            Frame::new()
+                                .inner_margin(Margin {
+                                    left: 10,
+                                    right: 10,
+                                    top: 0,
+                                    bottom: 6,
+                                })
+                                .show(ui, |ui| eyebrow(ui, label, p));
+                        };
+                        section(ui, "Workspace");
                         if nav(
                             ui,
                             "Library",
                             Some(snapshot.torrents.len()),
-                            self.view == "library",
+                            self.view == "library" && self.filter == "all",
                             Some(Glyph::Library),
                             p,
                         ) {
                             self.view = "library".into();
+                            self.filter = "all".into();
                         }
                         if nav(
                             ui,
@@ -251,12 +260,8 @@ impl TorrentApp {
                         ) {
                             self.view = "discover".into();
                         }
-                        ui.add_space(19.0);
-                        Frame::new()
-                            .inner_margin(Margin::symmetric(10, 4))
-                            .show(ui, |ui| {
-                                small(ui, "ACTIVITY", p);
-                            });
+                        ui.add_space(20.0);
+                        section(ui, "Activity");
                         for (id, label, glyph) in [
                             ("downloading", "Downloading", Glyph::Down),
                             ("seeding", "Seeding", Glyph::Up),
@@ -276,57 +281,19 @@ impl TorrentApp {
                     });
                 ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
                     ui.allocate_ui_with_layout(
-                        vec2(240.0, 166.0),
+                        vec2(232.0, 170.0),
                         Layout::top_down(Align::Min),
                         |ui| {
                             Frame::new()
-                                .inner_margin(Margin::symmetric(14, 14))
+                                .inner_margin(Margin::symmetric(12, 14))
                                 .show(ui, |ui| {
-                                    ui.set_width(212.0);
-                                    ui.spacing_mut().item_spacing.y = 6.0;
+                                    ui.set_width(208.0);
+                                    ui.spacing_mut().item_spacing.y = 8.0;
                                     if nav(ui, "Preferences", None, false, Some(Glyph::Settings), p)
                                     {
                                         self.settings_open = true;
                                     }
-                                    ui.add_space(6.0);
-                                    divider(ui, p);
-                                    ui.add_space(3.0);
-                                    value_row(ui, "Download", &speed(snapshot.down()), p);
-                                    value_row(ui, "Upload", &speed(snapshot.up()), p);
-                                    ui.horizontal(|ui| {
-                                        let (r, _) =
-                                            ui.allocate_exact_size(vec2(6.0, 6.0), Sense::hover());
-                                        ui.painter().circle_filled(
-                                            r.center(),
-                                            3.0,
-                                            if snapshot.ready { GREEN } else { YELLOW },
-                                        );
-                                        ui.label(
-                                            RichText::new(if snapshot.ready {
-                                                "Engine ready"
-                                            } else {
-                                                "Starting engine…"
-                                            })
-                                            .size(10.5)
-                                            .color(p.muted),
-                                        );
-                                        ui.with_layout(
-                                            Layout::right_to_left(Align::Center),
-                                            |ui| {
-                                                ui.label(mono(
-                                                    format!(
-                                                        "{} ratio",
-                                                        ratio(
-                                                            snapshot.uploaded(),
-                                                            snapshot.downloaded()
-                                                        )
-                                                    ),
-                                                    10.0,
-                                                    p.muted,
-                                                ));
-                                            },
-                                        );
-                                    });
+                                    self.transfer_summary(ui, snapshot, p);
                                 });
                         },
                     );
@@ -337,51 +304,96 @@ impl TorrentApp {
             });
     }
 
-    fn header(&mut self, ctx: &Context, p: Palette) {
+    fn transfer_summary(&self, ui: &mut Ui, snapshot: &Snapshot, p: Palette) {
+        Frame::new()
+            .fill(p.panel)
+            .stroke(Stroke::new(1.0_f32, p.border))
+            .corner_radius(12)
+            .inner_margin(Margin::symmetric(12, 10))
+            .shadow(card_shadow(p))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing.y = 6.0;
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
+                    let color = if snapshot.ready { GREEN } else { YELLOW };
+                    ui.painter()
+                        .circle_filled(r.center(), 4.5, color.gamma_multiply(0.25));
+                    ui.painter().circle_filled(r.center(), 2.5, color);
+                    ui.label(
+                        RichText::new(if snapshot.ready {
+                            "Engine ready"
+                        } else {
+                            "Starting engine…"
+                        })
+                        .size(11.5)
+                        .color(p.muted),
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "{} ratio",
+                                ratio(snapshot.uploaded(), snapshot.downloaded())
+                            ))
+                            .size(11.0)
+                            .color(p.faint),
+                        );
+                    });
+                });
+                for (glyph, color, label, value) in [
+                    (Glyph::Down, BLUE, "Download", snapshot.down()),
+                    (Glyph::Up, GREEN, "Upload", snapshot.up()),
+                ] {
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+                        icon(ui.painter(), r, glyph, p.ink(color));
+                        ui.label(RichText::new(label).size(12.0).color(p.muted));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(RichText::new(speed(value)).size(12.0).color(p.text));
+                        });
+                    });
+                }
+            });
+    }
+
+    fn header(&mut self, ctx: &Context, snapshot: &Snapshot, p: Palette) {
         TopBottomPanel::top("header")
-            .exact_height(64.0)
+            .exact_height(76.0)
+            .show_separator_line(false)
             .frame(
                 Frame::new()
-                    .fill(p.panel)
-                    .inner_margin(Margin::symmetric(28, 14)),
+                    .fill(p.bg)
+                    .inner_margin(Margin::symmetric(32, 18)),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    let width = (ui.available_width() - 220.0).clamp(180.0, 420.0);
-                    let field = ui.add_sized(
-                        [width, 36.0],
-                        TextEdit::singleline(&mut self.query)
-                            .id(Id::new("library-filter"))
-                            .hint_text("Filter your library…")
-                            .font(FontId::proportional(12.5))
-                            .margin(Margin {
-                                left: 35,
-                                right: 34,
-                                top: 10,
-                                bottom: 8,
-                            }),
-                    );
-                    icon(
-                        ui.painter(),
-                        Rect::from_min_size(field.rect.min + vec2(12.0, 11.0), vec2(14.0, 14.0)),
-                        Glyph::Search,
-                        p.muted,
-                    );
-                    if !self.query.is_empty() {
-                        let rect = Rect::from_center_size(
-                            field.rect.right_center() - vec2(17.0, 0.0),
-                            vec2(26.0, 26.0),
-                        );
-                        let clear = ui.interact(rect, Id::new("clear-library"), Sense::click());
-                        clear.widget_info(|| {
-                            WidgetInfo::labeled(WidgetType::Button, true, "Clear library filter")
-                        });
-                        icon(ui.painter(), rect.shrink(7.0), Glyph::Close, p.muted);
-                        if clear.clicked() {
-                            self.query.clear();
-                            field.request_focus();
-                        }
-                    }
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 1.0;
+                        let (title, subtitle) = if self.view == "discover" {
+                            (
+                                "Discover".to_owned(),
+                                "Search public indexes for something new".to_owned(),
+                            )
+                        } else {
+                            let title = match self.filter.as_str() {
+                                "downloading" => "Downloading",
+                                "seeding" => "Seeding",
+                                "paused" => "Paused",
+                                _ => "Library",
+                            };
+                            let total = snapshot.torrents.len();
+                            (
+                                title.to_owned(),
+                                format!(
+                                    "{total} {} · {} active",
+                                    if total == 1 { "torrent" } else { "torrents" },
+                                    snapshot.active()
+                                ),
+                            )
+                        };
+                        ui.label(display(title, 21.0).color(p.text));
+                        ui.label(RichText::new(subtitle).size(11.5).color(p.muted));
+                    });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if primary(ui, "+  Add torrent")
                             .on_hover_text(format!(
@@ -411,19 +423,96 @@ impl TorrentApp {
                             self.settings.light = !self.settings.light;
                             self.persist_settings();
                         }
+                        if self.view != "discover" {
+                            self.library_filter(ui, p);
+                        }
                     });
                 });
                 let r = ui.max_rect();
                 ui.painter().hline(
-                    r.x_range(),
-                    r.bottom() + 14.0,
-                    Stroke::new(1.0_f32, p.border),
+                    r.x_range().expand(32.0),
+                    r.bottom() + 18.0,
+                    Stroke::new(1.0_f32, mix(p.border, p.bg, 0.3)),
                 );
             });
     }
 
+    fn library_filter(&mut self, ui: &mut Ui, p: Palette) {
+        let width = (ui.available_width() - 16.0).clamp(150.0, 300.0);
+        let field = ui.add_sized(
+            [width, 34.0],
+            TextEdit::singleline(&mut self.query)
+                .id(Id::new("library-filter"))
+                .hint_text(RichText::new("Filter library").color(p.faint))
+                .font(FontId::proportional(12.5))
+                .margin(Margin {
+                    left: 34,
+                    right: 30,
+                    top: 9,
+                    bottom: 8,
+                }),
+        );
+        icon(
+            ui.painter(),
+            Rect::from_min_size(field.rect.min + vec2(12.0, 10.0), vec2(14.0, 14.0)),
+            Glyph::Search,
+            p.faint,
+        );
+        if self.query.is_empty() {
+            let hint = command_shortcut(ui.ctx(), Key::F);
+            let r = Rect::from_center_size(
+                field.rect.right_center() - vec2(22.0, 0.0),
+                vec2(30.0, 18.0),
+            );
+            ui.painter()
+                .rect_stroke(r, 5, Stroke::new(1.0_f32, p.border), StrokeKind::Inside);
+            ui.painter().text(
+                r.center(),
+                Align2::CENTER_CENTER,
+                hint,
+                FontId::proportional(10.0),
+                p.faint,
+            );
+        } else {
+            let rect = Rect::from_center_size(
+                field.rect.right_center() - vec2(16.0, 0.0),
+                vec2(24.0, 24.0),
+            );
+            let clear = ui.interact(rect, Id::new("clear-library"), Sense::click());
+            clear.widget_info(|| {
+                WidgetInfo::labeled(WidgetType::Button, true, "Clear library filter")
+            });
+            icon(
+                ui.painter(),
+                rect.shrink(7.0),
+                Glyph::Close,
+                if clear.hovered() { p.text } else { p.muted },
+            );
+            if clear.clicked() {
+                self.query.clear();
+                field.request_focus();
+            }
+        }
+    }
+
+    fn record_history(&mut self, s: &Snapshot) {
+        if self.history_sampled.elapsed() < Duration::from_secs(1) && !self.history.is_empty() {
+            return;
+        }
+        self.history_sampled = Instant::now();
+        if self.history.len() == HISTORY_LEN {
+            self.history.pop_front();
+        }
+        self.history.push_back((s.down(), s.up()));
+    }
+
     fn stats(&self, ui: &mut Ui, s: &Snapshot, p: Palette) {
         let columns = if ui.available_width() < 700.0 { 2 } else { 4 };
+        let ratio_value = if s.downloaded() == 0 {
+            if s.uploaded() > 0 { 1.0 } else { 0.0 }
+        } else {
+            (s.uploaded() as f32 / s.downloaded() as f32).min(1.0)
+        };
         let ratio_hint = if s.uploaded() == 0 {
             "No uploads yet"
         } else if s.uploaded() < s.downloaded() {
@@ -431,23 +520,32 @@ impl TorrentApp {
         } else {
             "Healthy sharing"
         };
+        let active = if s.torrents.is_empty() {
+            0.0
+        } else {
+            s.active() as f32 / s.torrents.len() as f32
+        };
+        let downs: Vec<f64> = self.history.iter().map(|h| h.0).collect();
+        let ups: Vec<f64> = self.history.iter().map(|h| h.1).collect();
         let cards = [
             (
-                "DOWNLOAD",
+                "Download",
                 speed(s.down()),
                 format!("{} received", bytes(s.downloaded() as f64)),
                 Glyph::Down,
                 BLUE,
+                Trend::Rates(&downs),
             ),
             (
-                "UPLOAD",
+                "Upload",
                 speed(s.up()),
                 format!("{} shared", bytes(s.uploaded() as f64)),
                 Glyph::Up,
                 GREEN,
+                Trend::Rates(&ups),
             ),
             (
-                "ACTIVE SWARM",
+                "Active swarm",
                 s.active().to_string(),
                 format!(
                     "{} idle · {} total",
@@ -455,37 +553,49 @@ impl TorrentApp {
                     s.torrents.len()
                 ),
                 Glyph::Peers,
-                p.muted,
+                VIOLET,
+                Trend::Share(active),
             ),
             (
-                "SHARE RATIO",
+                "Share ratio",
                 ratio(s.uploaded(), s.downloaded()),
                 ratio_hint.into(),
                 Glyph::Refresh,
-                p.muted,
+                YELLOW,
+                Trend::Share(ratio_value),
             ),
         ];
         for chunk in cards.chunks(columns) {
             ui.columns(columns, |columns| {
-                for (ui, (label, value, sub, g, color)) in columns.iter_mut().zip(chunk) {
+                for (ui, (label, value, sub, g, color, trend)) in columns.iter_mut().zip(chunk) {
                     card(p).show(ui, |ui| {
                         ui.set_width(ui.available_width());
+                        ui.spacing_mut().item_spacing.y = 2.0;
                         ui.horizontal(|ui| {
-                            small(ui, *label, p);
+                            ui.label(RichText::new(*label).size(12.0).color(p.muted));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                let (r, _) =
-                                    ui.allocate_exact_size(vec2(15.0, 15.0), Sense::hover());
-                                icon(ui.painter(), r, *g, *color);
+                                icon_badge(ui, *g, *color, p, 26.0);
                             });
                         });
-                        ui.add_space(5.0);
-                        ui.label(mono(value, 20.0, p.text));
-                        ui.label(RichText::new(sub).size(11.0).color(p.muted));
+                        ui.add(Label::new(display(value, 24.0).color(p.text)).truncate());
+                        ui.add(Label::new(RichText::new(sub).size(11.5).color(p.faint)).truncate());
+                        ui.add_space(8.0);
+                        let (r, _) = ui
+                            .allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
+                        match trend {
+                            Trend::Rates(values) => sparkline(ui.painter(), r, values, *color),
+                            Trend::Share(fraction) => {
+                                let mut bar = ui.new_child(UiBuilder::new().max_rect(
+                                    Rect::from_min_max(pos2(r.left(), r.bottom() - 5.0), r.max),
+                                ));
+                                progress(&mut bar, *fraction, *color, 5.0, p);
+                            }
+                        }
                     });
                 }
             });
         }
-        ui.add_space(23.0);
+        ui.add_space(26.0);
     }
 
     fn library(&mut self, ui: &mut Ui, s: &Snapshot, p: Palette) {
@@ -494,7 +604,6 @@ impl TorrentApp {
             .iter()
             .filter(|t| t.matches(&self.filter, &self.query))
             .collect();
-        small(ui, "YOUR LIBRARY", p);
         ui.horizontal(|ui| {
             let title = match self.filter.as_str() {
                 "downloading" => "Downloading",
@@ -502,7 +611,7 @@ impl TorrentApp {
                 "paused" => "Paused",
                 _ => "All torrents",
             };
-            ui.label(RichText::new(title).size(21.0).strong());
+            ui.label(display(title, 16.0).color(p.text));
             badge(ui, &rows.len().to_string(), p.muted, p);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if (self.filter != "all" || !self.query.is_empty())
@@ -513,103 +622,12 @@ impl TorrentApp {
                 }
             });
         });
-        muted(ui, "Your downloads, organized in one place.", p);
-        ui.add_space(14.0);
+        ui.add_space(10.0);
         if rows.is_empty() {
-            let empty = s.torrents.is_empty();
-            let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 322.0), Sense::hover());
-            ui.painter().rect(
-                r,
-                10,
-                p.panel,
-                Stroke::new(1.0_f32, p.border),
-                StrokeKind::Inside,
-            );
-            let mut content = ui.new_child(
-                UiBuilder::new()
-                    .max_rect(Rect::from_min_max(
-                        r.min + vec2(24.0, 48.0),
-                        r.max - vec2(24.0, 24.0),
-                    ))
-                    .layout(Layout::top_down(Align::Center)),
-            );
-            if empty {
-                let (mark, _) = content.allocate_exact_size(vec2(52.0, 52.0), Sense::hover());
-                brand_mark(content.painter(), mark);
-            } else {
-                icon_badge(&mut content, Glyph::Search, BLUE, p, 48.0);
-            }
-            content.add_space(12.0);
-            content.label(
-                RichText::new(if !s.ready {
-                    "Getting things ready"
-                } else if empty {
-                    "A little space for your next download"
-                } else {
-                    "No matching torrents"
-                })
-                .size(18.0)
-                .strong(),
-            );
-            content.label(
-                RichText::new(if empty {
-                    "Add a magnet link or a .torrent file to get started."
-                } else {
-                    "Try another name or clear your activity filters."
-                })
-                .size(12.5)
-                .color(p.muted),
-            );
-            content.add_space(10.0);
-            content.horizontal(|ui| {
-                let button_width = |text: &str, icon_width: f32| {
-                    ui.painter()
-                        .layout_no_wrap(text.into(), FontId::proportional(12.5), p.text)
-                        .size()
-                        .x
-                        + 24.0
-                        + icon_width
-                };
-                let total = if empty {
-                    button_width("Add torrent", 22.0)
-                        + ui.spacing().item_spacing.x
-                        + button_width("Explore torrents", 22.0)
-                } else {
-                    button_width("Reset filters", 0.0)
-                };
-                let pad = ((ui.available_width() - total) / 2.0).max(0.0);
-                ui.add_space(pad);
-                if primary(
-                    ui,
-                    if empty {
-                        "+  Add torrent"
-                    } else {
-                        "Reset filters"
-                    },
-                )
-                .clicked()
-                {
-                    if empty {
-                        self.open_add();
-                    } else {
-                        self.filter = "all".into();
-                        self.query.clear();
-                    }
-                }
-                if empty && secondary(ui, "Explore torrents", Some(Glyph::Compass), p).clicked() {
-                    self.view = "discover".into();
-                }
-            });
-            content.add_space(6.0);
-            let hint = format!(
-                "{} to add a torrent  ·  {} to choose a file",
-                command_shortcut(content.ctx(), Key::K),
-                command_shortcut(content.ctx(), Key::O)
-            );
-            small(&mut content, hint, p);
+            self.library_empty(ui, s, p);
             return;
         }
-        let cols = ((ui.available_width() + 14.0) / 270.0)
+        let cols = ((ui.available_width() + 14.0) / 280.0)
             .floor()
             .clamp(1.0, 4.0) as usize;
         for chunk in rows.chunks(cols) {
@@ -618,12 +636,117 @@ impl TorrentApp {
                     self.torrent_card(ui, t, p);
                 }
             });
-            ui.add_space(4.0);
+            ui.add_space(6.0);
         }
+    }
+
+    fn library_empty(&mut self, ui: &mut Ui, s: &Snapshot, p: Palette) {
+        let empty = s.torrents.is_empty();
+        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 340.0), Sense::hover());
+        ui.painter().add(card_shadow(p).as_shape(r, 16));
+        ui.painter().rect(
+            r,
+            16,
+            p.panel,
+            Stroke::new(1.0_f32, p.border),
+            StrokeKind::Inside,
+        );
+        // Soft concentric rings behind the illustration.
+        let center = pos2(r.center().x, r.top() + 84.0);
+        for (radius, alpha) in [(56.0, 0.05), (42.0, 0.08)] {
+            ui.painter()
+                .circle_filled(center, radius, BLUE.gamma_multiply(alpha));
+        }
+        let mut content = ui.new_child(
+            UiBuilder::new()
+                .max_rect(Rect::from_min_max(
+                    r.min + vec2(24.0, 58.0),
+                    r.max - vec2(24.0, 24.0),
+                ))
+                .layout(Layout::top_down(Align::Center)),
+        );
+        if empty {
+            let (mark, _) = content.allocate_exact_size(vec2(52.0, 52.0), Sense::hover());
+            brand_mark(content.painter(), mark);
+        } else {
+            icon_badge(&mut content, Glyph::Search, BLUE, p, 52.0);
+        }
+        content.add_space(26.0);
+        content.label(
+            display(
+                if !s.ready {
+                    "Getting things ready"
+                } else if empty {
+                    "A little space for your next download"
+                } else {
+                    "No matching torrents"
+                },
+                19.0,
+            )
+            .color(p.text),
+        );
+        content.add_space(2.0);
+        content.label(
+            RichText::new(if empty {
+                "Add a magnet link or a .torrent file to get started."
+            } else {
+                "Try another name or clear your activity filters."
+            })
+            .size(12.5)
+            .color(p.muted),
+        );
+        content.add_space(14.0);
+        content.horizontal(|ui| {
+            let button_width = |text: &str, icon_width: f32| {
+                ui.painter()
+                    .layout_no_wrap(text.into(), FontId::proportional(12.5), p.text)
+                    .size()
+                    .x
+                    + 26.0
+                    + icon_width
+            };
+            let total = if empty {
+                button_width("Add torrent", 21.0)
+                    + ui.spacing().item_spacing.x
+                    + button_width("Explore torrents", 21.0)
+            } else {
+                button_width("Reset filters", 0.0)
+            };
+            let pad = ((ui.available_width() - total) / 2.0).max(0.0);
+            ui.add_space(pad);
+            if primary(
+                ui,
+                if empty {
+                    "+  Add torrent"
+                } else {
+                    "Reset filters"
+                },
+            )
+            .clicked()
+            {
+                if empty {
+                    self.open_add();
+                } else {
+                    self.filter = "all".into();
+                    self.query.clear();
+                }
+            }
+            if empty && secondary(ui, "Explore torrents", Some(Glyph::Compass), p).clicked() {
+                self.view = "discover".into();
+            }
+        });
+        content.add_space(12.0);
+        let hint = format!(
+            "{} to add a torrent  ·  {} to choose a file",
+            command_shortcut(content.ctx(), Key::K),
+            command_shortcut(content.ctx(), Key::O)
+        );
+        content.label(RichText::new(hint).size(11.0).color(p.faint));
     }
 
     fn torrent_card(&mut self, ui: &mut Ui, t: &Torrent, p: Palette) {
         let selected = self.selected.as_deref() == Some(&t.hash);
+        let color = status_color(t);
         card(p)
             .stroke(Stroke::new(
                 1.0_f32,
@@ -637,64 +760,96 @@ impl TorrentApp {
                 ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing.y = 6.0;
                 ui.horizontal(|ui| {
-                    let (r, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
-                    icon(ui.painter(), r.shrink(2.0), Glyph::File, p.muted);
+                    status_pill(ui, t.status(), color, p);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        badge(ui, t.status(), status_color(t), p);
+                        ui.label(
+                            display(format!("{:.0}%", t.progress() * 100.0), 15.0).color(p.text),
+                        );
                     });
                 });
-                ui.add_space(3.0);
-                let name = clipped_text(ui, &t.name, 13.0, p.text, 2, 36.0);
+                ui.add_space(4.0);
+                let name = clipped_text(ui, &t.name, 13.5, p.text, 2, 38.0);
                 if ui
                     .interact(name.rect, Id::new(("select", &t.hash)), Sense::click())
+                    .on_hover_cursor(CursorIcon::PointingHand)
                     .clicked()
                 {
                     self.selected = Some(t.hash.clone());
                 }
+                progress(ui, t.progress(), color, 6.0, p);
                 ui.horizontal(|ui| {
-                    ui.label(mono(format!("{:.0}%", t.progress() * 100.0), 12.0, p.text));
+                    ui.label(
+                        RichText::new(if t.size == 0 {
+                            "Fetching metadata…".to_owned()
+                        } else {
+                            format!(
+                                "{} of {}",
+                                bytes(t.downloaded.min(t.size) as f64),
+                                bytes(t.size as f64)
+                            )
+                        })
+                        .size(11.5)
+                        .color(p.muted),
+                    );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
-                            RichText::new(if t.done {
+                            RichText::new(if t.error.is_some() {
+                                "Needs attention".into()
+                            } else if t.done {
                                 "Complete".into()
                             } else if t.paused {
                                 "Paused".into()
                             } else {
-                                format!("{} remaining", t.eta())
+                                format!("{} left", t.eta())
                             })
-                            .size(10.5)
-                            .color(p.muted),
+                            .size(11.5)
+                            .color(if t.error.is_some() {
+                                p.ink(RED)
+                            } else {
+                                p.muted
+                            }),
                         );
                     });
                 });
-                ui.add(
-                    ProgressBar::new(t.progress())
-                        .desired_height(7.0)
-                        .fill(status_color(t))
-                        .corner_radius(4),
-                );
-                ui.add_space(5.0);
-                divider(ui, p);
-                ui.add_space(3.0);
-                ui.columns(3, |cols| {
-                    for col in cols.iter_mut() {
-                        col.spacing_mut().item_spacing.y = 3.0;
-                    }
-                    for (col, label, value) in [
-                        (0, "DOWN", speed(t.down_speed)),
-                        (1, "UP", speed(t.up_speed)),
-                        (2, "PEERS", t.peers.to_string()),
-                        (0, "ETA", t.eta()),
-                        (1, "SIZE", bytes(t.size as f64)),
-                        (2, "FILES", t.files.len().to_string()),
-                    ] {
-                        cols[col].label(mono(label, 9.0, p.muted));
-                        cols[col].add(Label::new(mono(value, 11.0, p.text)).truncate());
-                    }
-                });
-                ui.add_space(3.0);
-                divider(ui, p);
+                ui.add_space(4.0);
+                inset(p)
+                    .inner_margin(Margin::symmetric(10, 7))
+                    .corner_radius(8)
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.columns(3, |cols| {
+                            for (col, glyph, tint, value, tip) in [
+                                (0, Glyph::Down, BLUE, speed(t.down_speed), "Download speed"),
+                                (1, Glyph::Up, GREEN, speed(t.up_speed), "Upload speed"),
+                                (
+                                    2,
+                                    Glyph::Peers,
+                                    VIOLET,
+                                    t.peers.to_string(),
+                                    "Connected peers",
+                                ),
+                            ] {
+                                cols[col]
+                                    .horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 5.0;
+                                        let (r, _) = ui
+                                            .allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                                        icon(ui.painter(), r, glyph, p.ink(tint));
+                                        ui.add(
+                                            Label::new(
+                                                RichText::new(value).size(11.5).color(p.text),
+                                            )
+                                            .truncate(),
+                                        );
+                                    })
+                                    .response
+                                    .on_hover_text(tip);
+                            }
+                        });
+                    });
+                ui.add_space(2.0);
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
                     if icon_button(
                         ui,
                         if t.paused || t.error.is_some() {
@@ -775,93 +930,114 @@ impl TorrentApp {
         }));
     }
     fn discover(&mut self, ui: &mut Ui, s: &Snapshot, p: Palette) {
-        small(ui, "EXPLORE", p);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Discover torrents").size(21.0).strong());
-            if !self.response.results.is_empty() && !self.searching {
-                badge(ui, &self.response.results.len().to_string(), p.muted, p);
-            }
-        });
-        muted(
-            ui,
-            "Find something new across your favorite public indexes.",
-            p,
-        );
-        ui.add_space(13.0);
         let field = ui.add_sized(
-            [ui.available_width(), 46.0],
+            [ui.available_width(), 48.0],
             TextEdit::singleline(&mut self.search_query)
                 .id(Id::new("discovery-search"))
-                .hint_text("Search movies, shows, games, and more…")
+                .hint_text(RichText::new("Search movies, shows, games, and more…").color(p.faint))
                 .margin(Margin {
-                    left: 40,
-                    right: 38,
-                    top: 14,
-                    bottom: 12,
+                    left: 44,
+                    right: 40,
+                    top: 15,
+                    bottom: 13,
                 })
-                .font(FontId::proportional(13.0)),
+                .font(FontId::proportional(14.0)),
         );
         icon(
             ui.painter(),
-            Rect::from_min_size(field.rect.min + vec2(14.0, 15.0), vec2(16.0, 16.0)),
+            Rect::from_min_size(field.rect.min + vec2(16.0, 16.0), vec2(16.0, 16.0)),
             Glyph::Search,
-            p.muted,
+            if field.has_focus() { BLUE } else { p.faint },
         );
         if field.changed() {
             self.schedule_search();
         }
         if !self.search_query.is_empty() {
             let r = Rect::from_center_size(
-                field.rect.right_center() - vec2(20.0, 0.0),
+                field.rect.right_center() - vec2(22.0, 0.0),
                 vec2(28.0, 28.0),
             );
             let clear = ui.interact(r, Id::new("clear-search"), Sense::click());
             clear.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Clear search"));
-            icon(ui.painter(), r.shrink(8.0), Glyph::Close, p.muted);
+            if clear.hovered() {
+                ui.painter().rect_filled(r, 7, p.panel2);
+            }
+            icon(
+                ui.painter(),
+                r.shrink(8.0),
+                Glyph::Close,
+                if clear.hovered() { p.text } else { p.muted },
+            );
             if clear.clicked() {
                 self.search_query.clear();
                 self.schedule_search();
                 field.request_focus();
             }
         }
+        ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            for source in ["all", "piratebay", "yts", "tv", "fitgirl"] {
-                if segment(
-                    ui,
-                    source_name(source),
-                    self.source == source,
-                    None,
-                    p,
-                    None,
-                ) {
-                    self.source = if self.source == source { "all" } else { source }.into();
-                    self.schedule_search();
-                }
+            track(p).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    for source in ["all", "piratebay", "yts", "tv", "fitgirl"] {
+                        if segment(
+                            ui,
+                            source_name(source),
+                            self.source == source,
+                            None,
+                            p,
+                            None,
+                        ) {
+                            self.source = if self.source == source { "all" } else { source }.into();
+                            self.schedule_search();
+                        }
+                    }
+                });
+            });
+            if !self.response.results.is_empty() && !self.searching {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let count = self.response.results.len();
+                    ui.label(
+                        RichText::new(format!(
+                            "{count} {}",
+                            if count == 1 { "result" } else { "results" }
+                        ))
+                        .size(12.0)
+                        .color(p.muted),
+                    );
+                });
             }
         });
-        ui.add_space(10.0);
+        ui.add_space(12.0);
         if self.searching {
             ui.horizontal(|ui| {
-                ui.spinner();
+                ui.add(Spinner::new().size(14.0).color(BLUE));
                 muted(ui, "Searching public indexes…", p);
             });
+            ui.add_space(4.0);
             let cols = if ui.available_width() > 700.0 { 3 } else { 2 };
+            let pulse = (ui.input(|i| i.time) * 2.4).sin() as f32 * 0.5 + 0.5;
+            let shimmer = mix(p.panel2, p.border, pulse * 0.6);
             ui.columns(cols, |columns| {
                 for ui in columns {
                     card(p).show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         let (r, _) = ui
-                            .allocate_exact_size(vec2(ui.available_width(), 116.0), Sense::hover());
-                        for (y, fraction) in [(0.0, 0.32), (30.0, 0.9), (48.0, 0.65), (90.0, 0.45)]
-                        {
+                            .allocate_exact_size(vec2(ui.available_width(), 120.0), Sense::hover());
+                        for (y, fraction, h) in [
+                            (0.0, 0.28, 18.0),
+                            (32.0, 0.92, 10.0),
+                            (50.0, 0.64, 10.0),
+                            (84.0, 0.4, 10.0),
+                            (102.0, 1.0, 1.0),
+                        ] {
                             ui.painter().rect_filled(
                                 Rect::from_min_size(
                                     r.min + vec2(0.0, y),
-                                    vec2(r.width() * fraction, 8.0),
+                                    vec2(r.width() * fraction, h),
                                 ),
-                                3,
-                                p.panel2,
+                                5,
+                                shimmer,
                             );
                         }
                     });
@@ -870,15 +1046,21 @@ impl TorrentApp {
             return;
         }
         if !self.response.warnings.is_empty() {
-            card(p)
-                .fill(mix(p.panel, YELLOW, 0.035))
-                .stroke(Stroke::new(1.0_f32, mix(p.border, YELLOW, 0.18)))
+            Frame::new()
+                .fill(p.tint(YELLOW, 0.06))
+                .stroke(Stroke::new(1.0_f32, p.tint(YELLOW, 0.25)))
+                .corner_radius(12)
+                .inner_margin(Margin::symmetric(14, 10))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
                         let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                        icon(ui.painter(), r, Glyph::Warning, YELLOW);
-                        ui.label(RichText::new("Some indexes are unavailable").size(12.5));
+                        icon(ui.painter(), r, Glyph::Warning, p.ink(YELLOW));
+                        ui.label(
+                            RichText::new("Some indexes are unavailable")
+                                .size(12.5)
+                                .color(p.text),
+                        );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ghost(ui, "Retry", Some(Glyph::Refresh), p).clicked() {
                                 self.schedule_search();
@@ -886,37 +1068,59 @@ impl TorrentApp {
                         });
                     });
                     for warning in &self.response.warnings {
-                        muted(ui, warning, p);
+                        ui.horizontal(|ui| {
+                            ui.add_space(26.0);
+                            ui.add(
+                                Label::new(RichText::new(warning).size(11.5).color(p.muted)).wrap(),
+                            );
+                        });
                     }
                 });
-            ui.add_space(6.0);
+            ui.add_space(10.0);
         }
         if self.search_query.trim().len() < 2 || self.response.results.is_empty() {
-            card(p).show(ui, |ui| {
+            let idle = self.search_query.trim().len() < 2;
+            card(p).corner_radius(16).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.add_space(24.0);
+                ui.add_space(30.0);
                 ui.vertical_centered(|ui| {
-                    icon_badge(ui, Glyph::Compass, BLUE, p, 44.0);
-                    ui.add_space(7.0);
-                    ui.label(
-                        RichText::new(if self.search_query.trim().len() < 2 {
-                            "Your next find starts here"
-                        } else {
-                            "No results this time"
-                        })
-                        .size(16.0)
-                        .strong(),
+                    let (r, _) = ui.allocate_exact_size(vec2(120.0, 64.0), Sense::hover());
+                    ui.painter()
+                        .circle_filled(r.center(), 46.0, BLUE.gamma_multiply(0.05));
+                    let mut tile = ui.new_child(
+                        UiBuilder::new()
+                            .max_rect(Rect::from_center_size(r.center(), vec2(48.0, 48.0))),
                     );
+                    icon_badge(
+                        &mut tile,
+                        if idle { Glyph::Compass } else { Glyph::Search },
+                        BLUE,
+                        p,
+                        48.0,
+                    );
+                    ui.add_space(12.0);
+                    ui.label(
+                        display(
+                            if idle {
+                                "Your next find starts here"
+                            } else {
+                                "No results this time"
+                            },
+                            18.0,
+                        )
+                        .color(p.text),
+                    );
+                    ui.add_space(2.0);
                     muted(
                         ui,
-                        if self.search_query.trim().len() < 2 {
+                        if idle {
                             "Type at least two characters, then choose an index or search them all."
                         } else {
                             "Try broader keywords or select a different index."
                         },
                         p,
                     );
-                    ui.add_space(20.0);
+                    ui.add_space(28.0);
                 });
             });
             return;
@@ -934,56 +1138,72 @@ impl TorrentApp {
                         .find(|t| t.hash.eq_ignore_ascii_case(&result.hash));
                     card(p).show(ui, |ui| {
                         ui.set_width(ui.available_width());
+                        ui.spacing_mut().item_spacing.y = 6.0;
                         ui.horizontal(|ui| {
                             badge(
                                 ui,
                                 source_name(&result.source),
                                 if result.source == "fitgirl" {
-                                    BLUE
+                                    VIOLET
                                 } else {
-                                    p.muted
+                                    BLUE
                                 },
                                 p,
                             );
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 ui.add(
                                     Label::new(
-                                        RichText::new(&result.category).size(10.0).color(p.muted),
+                                        RichText::new(&result.category).size(11.0).color(p.faint),
                                     )
                                     .truncate(),
                                 );
                             });
                         });
                         ui.add_space(2.0);
-                        let name = clipped_text(ui, &result.name, 13.0, p.text, 2, 36.0);
+                        let name = clipped_text(ui, &result.name, 13.5, p.text, 2, 38.0);
                         if ui
                             .interact(
                                 name.rect,
                                 Id::new(("result", &result.source, &result.hash)),
                                 Sense::click(),
                             )
+                            .on_hover_cursor(CursorIcon::PointingHand)
                             .clicked()
                         {
                             self.result_detail = Some(result.clone());
                         }
-                        divider(ui, p);
                         ui.horizontal(|ui| {
-                            ui.label(mono(bytes(result.size as f64), 11.0, p.muted));
+                            ui.label(
+                                RichText::new(bytes(result.size as f64))
+                                    .size(11.5)
+                                    .color(p.muted),
+                            );
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(mono(
-                                    format!("↓ {}", result.leechers),
-                                    11.0,
-                                    if result.leechers > 0 { RED } else { p.muted },
-                                ))
-                                .on_hover_text("Leechers");
-                                ui.label(mono(
-                                    format!("↑ {}", result.seeders),
-                                    11.0,
-                                    if result.seeders > 0 { GREEN } else { p.muted },
-                                ))
-                                .on_hover_text("Seeders");
+                                ui.spacing_mut().item_spacing.x = 12.0;
+                                for (count, color, tip) in [
+                                    (result.leechers, RED, "Leechers"),
+                                    (result.seeders, GREEN, "Seeders"),
+                                ] {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 5.0;
+                                        let tone = if count > 0 { color } else { p.faint };
+                                        let (r, _) =
+                                            ui.allocate_exact_size(vec2(6.0, 12.0), Sense::hover());
+                                        ui.painter().circle_filled(r.center(), 3.0, tone);
+                                        ui.label(
+                                            RichText::new(count.to_string())
+                                                .size(11.5)
+                                                .color(if count > 0 { p.text } else { p.faint }),
+                                        );
+                                    })
+                                    .response
+                                    .on_hover_text(tip);
+                                }
                             });
                         });
+                        ui.add_space(2.0);
+                        divider(ui, p);
+                        ui.add_space(2.0);
                         ui.horizontal(|ui| {
                             if ghost(ui, "Details", None, p).clicked() {
                                 self.result_detail = Some(result.clone());
@@ -995,7 +1215,17 @@ impl TorrentApp {
                                         self.filter = "all".into();
                                         self.selected = Some(t.hash.clone());
                                     }
-                                } else if primary(ui, "+  Add").clicked() {
+                                } else if action_sized(
+                                    ui,
+                                    "Add",
+                                    Some(Glyph::Plus),
+                                    ButtonKind::Primary,
+                                    p,
+                                    None,
+                                    30.0,
+                                )
+                                .clicked()
+                                {
                                     self.engine.send(Command::AddMagnet(result.magnet.clone()));
                                 }
                             });
@@ -1003,7 +1233,7 @@ impl TorrentApp {
                     });
                 }
             });
-            ui.add_space(4.0);
+            ui.add_space(6.0);
         }
     }
 }
@@ -1088,14 +1318,16 @@ impl eframe::App for TorrentApp {
                 self.notice("Choose a .torrent file", true);
             }
         }
+        self.record_history(&snapshot);
         self.sidebar(ctx, &snapshot, p);
-        self.header(ctx, p);
+        self.header(ctx, &snapshot, p);
         CentralPanel::default()
-            .frame(
-                Frame::new()
-                    .fill(p.bg)
-                    .inner_margin(Margin::symmetric(28, 26)),
-            )
+            .frame(Frame::new().fill(p.bg).inner_margin(Margin {
+                left: 32,
+                right: 32,
+                top: 22,
+                bottom: 24,
+            }))
             .show(ctx, |ui| {
                 ScrollArea::vertical()
                     .id_salt("content")
@@ -1113,31 +1345,36 @@ impl eframe::App for TorrentApp {
             && started.elapsed() < Duration::from_secs(if error { 14 } else { 4 })
         {
             Area::new(Id::new("notice"))
-                .anchor(Align2::CENTER_BOTTOM, vec2(0.0, -20.0))
+                .anchor(Align2::CENTER_BOTTOM, vec2(116.0, -24.0))
                 .order(Order::Tooltip)
                 .show(ctx, |ui| {
                     card(p)
-                        .inner_margin(Margin::symmetric(14, 8))
+                        .corner_radius(14)
+                        .inner_margin(Margin {
+                            left: 10,
+                            right: 6,
+                            top: 6,
+                            bottom: 6,
+                        })
                         .shadow(Shadow {
-                            offset: [0, 4],
-                            blur: 20,
+                            offset: [0, 10],
+                            blur: 30,
                             spread: 0,
-                            color: Color32::from_black_alpha(50),
+                            color: Color32::from_black_alpha(if p.light { 30 } else { 80 }),
                         })
                         .show(ui, |ui| {
                             ui.set_max_width(540.0);
                             ui.horizontal(|ui| {
                                 ui.set_min_height(32.0);
-                                let (r, _) =
-                                    ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                                icon(
-                                    ui.painter(),
-                                    r,
+                                icon_badge(
+                                    ui,
                                     if error { Glyph::Warning } else { Glyph::Check },
                                     if error { RED } else { GREEN },
+                                    p,
+                                    26.0,
                                 );
                                 ui.add(
-                                    Label::new(RichText::new(text).size(12.0).color(p.text)).wrap(),
+                                    Label::new(RichText::new(text).size(12.5).color(p.text)).wrap(),
                                 );
                                 if icon_button(ui, Glyph::Close, "Dismiss notification", p)
                                     .clicked()
@@ -1162,6 +1399,10 @@ impl eframe::App for TorrentApp {
         } else {
             500
         }));
+    }
+    fn clear_color(&self, visuals: &Visuals) -> [f32; 4] {
+        // Match the canvas so no dark seams show between panels in light mode.
+        visuals.panel_fill.to_normalized_gamma_f32()
     }
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         if let Some(task) = self.search_task.take() {

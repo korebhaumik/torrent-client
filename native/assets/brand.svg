@@ -1,5 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
-<rect x="64" y="64" width="896" height="896" rx="200" fill="#4C73EC"/>
-<path d="M280 634L535 379C710 204 890 384 715 559L460 814" stroke="white" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M400 514L493 607M580 694L673 601" stroke="white" stroke-width="24"/>
+<defs>
+<linearGradient id="fill" x1="160" y1="96" x2="864" y2="928" gradientUnits="userSpaceOnUse">
+<stop stop-color="#7C5CFF"/>
+<stop offset="1" stop-color="#2C6EF5"/>
+</linearGradient>
+<linearGradient id="sheen" x1="512" y1="64" x2="512" y2="560" gradientUnits="userSpaceOnUse">
+<stop stop-color="white" stop-opacity="0.16"/>
+<stop offset="1" stop-color="white" stop-opacity="0"/>
+</linearGradient>
+</defs>
+<rect x="64" y="64" width="896" height="896" rx="200" fill="url(#fill)"/>
+<rect x="64" y="64" width="896" height="896" rx="200" fill="url(#sheen)"/>
+<g stroke="white" stroke-linecap="round" stroke-linejoin="round">
+<path d="M300 270H724M512 270V660M396 556L512 672L628 556" stroke-width="64"/>
+<path d="M330 790H694" stroke-width="48"/>
+</g>
 </svg>

@@ -1,4 +1,5 @@
 use eframe::egui::*;
+use std::path::PathBuf;
 
 pub(crate) fn command_shortcut(ctx: &Context, key: Key) -> String {
     if ctx.os().is_mac() && key == Key::Enter {
@@ -8,47 +9,164 @@ pub(crate) fn command_shortcut(ctx: &Context, key: Key) -> String {
     }
 }
 
-pub(crate) const BLUE: Color32 = Color32::from_rgb(76, 115, 236);
-pub(crate) const GREEN: Color32 = Color32::from_rgb(52, 211, 153);
-pub(crate) const YELLOW: Color32 = Color32::from_rgb(251, 191, 36);
-pub(crate) const RED: Color32 = Color32::from_rgb(248, 113, 113);
+/// Primary accent, used for actions, focus, and downloading.
+pub(crate) const BLUE: Color32 = Color32::from_rgb(92, 104, 255);
+/// Start of the brand gradient; `BRAND_END` is its other end.
+pub(crate) const VIOLET: Color32 = Color32::from_rgb(124, 92, 255);
+const BRAND_END: Color32 = Color32::from_rgb(44, 110, 245);
+pub(crate) const GREEN: Color32 = Color32::from_rgb(38, 201, 148);
+pub(crate) const YELLOW: Color32 = Color32::from_rgb(245, 180, 64);
+pub(crate) const RED: Color32 = Color32::from_rgb(240, 98, 108);
+const IDLE: Color32 = Color32::from_rgb(140, 144, 162);
 pub(crate) const fn rgb(r: u8, g: u8, b: u8) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
+/// Font family for titles and headline numbers. Always registered by
+/// [`fonts`]; it falls back to the proportional fonts when no system face exists.
+pub(crate) const DISPLAY: &str = "Display";
+
+/// System fonts with bundled egui fonts kept as fallbacks for missing glyphs.
+pub(crate) fn fonts() -> FontDefinitions {
+    let mut fonts = FontDefinitions::default();
+    let windows_fonts = std::env::var_os("WINDIR")
+        .map(|dir| PathBuf::from(dir).join("Fonts"))
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows\Fonts"));
+    let candidates = [
+        (
+            "SF",
+            PathBuf::from("/System/Library/Fonts/SFNS.ttf"),
+            0,
+            Some(FontFamily::Proportional),
+        ),
+        (
+            "SF Mono",
+            PathBuf::from("/System/Library/Fonts/SFNSMono.ttf"),
+            0,
+            Some(FontFamily::Monospace),
+        ),
+        // Face 2 of the collection is Avenir Next Demi Bold.
+        (
+            "Avenir Next Demi Bold",
+            PathBuf::from("/System/Library/Fonts/Avenir Next.ttc"),
+            2,
+            None,
+        ),
+        (
+            "Segoe UI",
+            windows_fonts.join("segoeui.ttf"),
+            0,
+            Some(FontFamily::Proportional),
+        ),
+        (
+            "Consolas",
+            windows_fonts.join("consola.ttf"),
+            0,
+            Some(FontFamily::Monospace),
+        ),
+        (
+            "Segoe UI Semibold",
+            windows_fonts.join("seguisb.ttf"),
+            0,
+            None,
+        ),
+    ];
+    let mut display = Vec::new();
+    for (name, path, index, family) in candidates {
+        let Ok(data) = std::fs::read(&path) else {
+            continue;
+        };
+        let mut font = FontData::from_owned(data);
+        font.index = index;
+        fonts.font_data.insert(name.into(), font.into());
+        match family {
+            Some(family) => fonts
+                .families
+                .entry(family)
+                .or_default()
+                .insert(0, name.into()),
+            None => display.push(name.to_owned()),
+        }
+    }
+    display.extend(
+        fonts
+            .families
+            .get(&FontFamily::Proportional)
+            .cloned()
+            .unwrap_or_default(),
+    );
+    fonts
+        .families
+        .insert(FontFamily::Name(DISPLAY.into()), display);
+    fonts
+}
+pub(crate) fn display_font(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(DISPLAY.into()))
+}
+pub(crate) fn display(text: impl Into<String>, size: f32) -> RichText {
+    RichText::new(text).font(display_font(size))
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Palette {
+    pub light: bool,
     pub bg: Color32,
+    pub sidebar: Color32,
     pub panel: Color32,
     pub panel2: Color32,
+    pub field: Color32,
     pub border: Color32,
     pub text: Color32,
     pub muted: Color32,
+    pub faint: Color32,
     pub active: Color32,
 }
 impl Palette {
     pub fn new(light: bool) -> Self {
         if light {
             Self {
-                bg: rgb(246, 247, 250),
+                light,
+                bg: rgb(246, 246, 249),
+                sidebar: rgb(239, 239, 244),
                 panel: Color32::WHITE,
-                panel2: rgb(240, 242, 247),
-                border: rgb(224, 228, 237),
-                text: rgb(24, 29, 40),
-                muted: rgb(107, 115, 132),
-                active: rgb(231, 237, 255),
+                panel2: rgb(242, 242, 247),
+                field: Color32::WHITE,
+                border: rgb(225, 226, 234),
+                text: rgb(22, 23, 33),
+                muted: rgb(100, 104, 122),
+                faint: rgb(146, 149, 166),
+                active: rgb(232, 233, 255),
             }
         } else {
             Self {
-                bg: rgb(10, 10, 13),
-                panel: rgb(19, 19, 24),
-                panel2: rgb(26, 27, 34),
-                border: rgb(37, 39, 49),
-                text: rgb(237, 239, 245),
-                muted: rgb(143, 149, 166),
-                active: rgb(31, 41, 69),
+                light,
+                bg: rgb(13, 13, 17),
+                sidebar: rgb(17, 17, 22),
+                panel: rgb(22, 22, 28),
+                panel2: rgb(30, 31, 39),
+                field: rgb(20, 20, 26),
+                border: rgb(39, 40, 50),
+                text: rgb(237, 237, 243),
+                muted: rgb(142, 145, 162),
+                faint: rgb(96, 99, 116),
+                active: rgb(33, 35, 64),
             }
         }
+    }
+    /// A readable text tone of a status color on this theme's panels.
+    pub fn ink(&self, color: Color32) -> Color32 {
+        if self.light {
+            mix(color, rgb(0, 0, 0), 0.28)
+        } else {
+            color
+        }
+    }
+    pub fn tint(&self, color: Color32, amount: f32) -> Color32 {
+        mix(
+            self.panel,
+            color,
+            if self.light { amount } else { amount * 1.3 },
+        )
     }
 }
 pub(crate) fn mono(text: impl Into<String>, size: f32, color: Color32) -> RichText {
@@ -56,25 +174,70 @@ pub(crate) fn mono(text: impl Into<String>, size: f32, color: Color32) -> RichTe
         .font(FontId::monospace(size))
         .color(color)
 }
+/// Secondary metadata text.
 pub(crate) fn small(ui: &mut Ui, text: impl Into<String>, p: Palette) {
-    ui.label(mono(text, 10.0, p.muted));
+    ui.label(RichText::new(text).size(11.0).color(p.muted));
+}
+/// Spaced uppercase section label.
+pub(crate) fn eyebrow(ui: &mut Ui, text: &str, p: Palette) -> Response {
+    let mut job = text::LayoutJob::default();
+    job.append(
+        &text.to_uppercase(),
+        0.0,
+        TextFormat {
+            font_id: FontId::proportional(10.5),
+            color: p.faint,
+            extra_letter_spacing: 0.9,
+            ..Default::default()
+        },
+    );
+    ui.label(job)
 }
 pub(crate) fn muted(ui: &mut Ui, text: impl Into<String>, p: Palette) {
     ui.label(RichText::new(text).size(12.0).color(p.muted));
+}
+pub(crate) fn card_shadow(p: Palette) -> Shadow {
+    if p.light {
+        Shadow {
+            offset: [0, 1],
+            blur: 3,
+            spread: 0,
+            color: Color32::from_black_alpha(14),
+        }
+    } else {
+        Shadow::NONE
+    }
 }
 pub(crate) fn card(p: Palette) -> Frame {
     Frame::new()
         .fill(p.panel)
         .stroke(Stroke::new(1.0_f32, p.border))
-        .corner_radius(9)
+        .corner_radius(12)
         .inner_margin(16)
+        .shadow(card_shadow(p))
+}
+/// A recessed surface inside a card or dialog.
+pub(crate) fn inset(p: Palette) -> Frame {
+    Frame::new()
+        .fill(if p.light { p.panel2 } else { p.bg })
+        .stroke(Stroke::new(1.0_f32, mix(p.border, p.panel, 0.3)))
+        .corner_radius(10)
+        .inner_margin(14)
+}
+/// The track behind a row of [`segment`] controls.
+pub(crate) fn track(p: Palette) -> Frame {
+    Frame::new()
+        .fill(if p.light { p.panel2 } else { p.bg })
+        .stroke(Stroke::new(1.0_f32, mix(p.border, p.panel, 0.4)))
+        .corner_radius(10)
+        .inner_margin(3)
 }
 pub(crate) fn modal_frame(p: Palette) -> Frame {
-    card(p).corner_radius(14).inner_margin(24).shadow(Shadow {
-        offset: [0, 12],
-        blur: 40,
+    card(p).corner_radius(16).inner_margin(24).shadow(Shadow {
+        offset: [0, 18],
+        blur: 48,
         spread: 0,
-        color: Color32::from_black_alpha(65),
+        color: Color32::from_black_alpha(if p.light { 40 } else { 90 }),
     })
 }
 pub(crate) fn divider(ui: &mut Ui, p: Palette) {
@@ -367,7 +530,7 @@ pub(crate) fn action(
     kind: ButtonKind,
     p: Palette,
 ) -> Response {
-    action_sized(ui, text, glyph, kind, p, None, 36.0)
+    action_sized(ui, text, glyph, kind, p, None, 34.0)
 }
 pub(crate) fn action_sized(
     ui: &mut Ui,
@@ -378,10 +541,12 @@ pub(crate) fn action_sized(
     width: Option<f32>,
     height: f32,
 ) -> Response {
+    let font = FontId::proportional(12.5);
     let galley = ui
         .painter()
-        .layout_no_wrap(text.to_owned(), FontId::proportional(12.5), p.text);
-    let natural = galley.size().x + 24.0 + if glyph.is_some() { 22.0 } else { 0.0 };
+        .layout_no_wrap(text.to_owned(), font.clone(), p.text);
+    let icon_width = if glyph.is_some() { 21.0 } else { 0.0 };
+    let natural = galley.size().x + 26.0 + icon_width;
     let (r, response) =
         ui.allocate_exact_size(vec2(width.unwrap_or(natural), height), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), text));
@@ -391,11 +556,20 @@ pub(crate) fn action_sized(
     let (base, over, stroke, text_color) = match kind {
         ButtonKind::Primary => (
             BLUE,
-            rgb(90, 129, 250),
+            mix(BLUE, Color32::WHITE, 0.12),
             Color32::TRANSPARENT,
             Color32::WHITE,
         ),
-        ButtonKind::Secondary => (p.panel2, mix(p.panel2, BLUE, 0.09), p.border, p.text),
+        ButtonKind::Secondary => (
+            if p.light { p.panel } else { p.panel2 },
+            if p.light {
+                p.panel2
+            } else {
+                mix(p.panel2, Color32::WHITE, 0.04)
+            },
+            p.border,
+            p.text,
+        ),
         ButtonKind::Ghost => (
             Color32::TRANSPARENT,
             p.panel2,
@@ -403,36 +577,64 @@ pub(crate) fn action_sized(
             p.muted,
         ),
         ButtonKind::Danger => (
-            mix(p.panel, RED, 0.09),
-            mix(p.panel, RED, 0.17),
-            mix(p.border, RED, 0.3),
-            RED,
+            mix(RED, Color32::BLACK, 0.06),
+            mix(RED, Color32::WHITE, 0.08),
+            Color32::TRANSPARENT,
+            Color32::WHITE,
         ),
     };
     let pressed = response.is_pointer_button_down_on();
     let enabled = ui.is_enabled();
     let fill = if pressed {
-        mix(base, Color32::BLACK, 0.14)
+        mix(base, Color32::BLACK, 0.12)
     } else {
         mix(base, over, hover)
     };
+    let solid = matches!(kind, ButtonKind::Primary | ButtonKind::Danger);
+    if solid && enabled {
+        ui.painter().add(
+            Shadow {
+                offset: [0, 2],
+                blur: 8,
+                spread: 0,
+                color: base.gamma_multiply(if p.light { 0.25 } else { 0.18 }),
+            }
+            .as_shape(r, 8),
+        );
+    }
     ui.painter().rect(
         r,
-        6,
+        8,
         if enabled {
             fill
+        } else if solid {
+            p.tint(base, 0.14)
         } else {
             mix(p.panel, p.panel2, 0.6)
         },
         Stroke::new(1.0_f32, if enabled { stroke } else { p.border }),
         StrokeKind::Inside,
     );
+    if solid && enabled {
+        // A faint top highlight gives solid buttons some depth.
+        ui.painter().hline(
+            r.x_range().shrink(6.0),
+            r.top() + 0.5,
+            Stroke::new(1.0_f32, Color32::from_white_alpha(38)),
+        );
+    }
     let color = if enabled {
-        text_color
+        if matches!(kind, ButtonKind::Ghost) {
+            mix(text_color, p.text, hover)
+        } else {
+            text_color
+        }
+    } else if solid {
+        mix(p.ink(base), p.panel, 0.3)
     } else {
         mix(p.muted, p.panel, 0.45)
     };
-    let content_width = galley.size().x + if glyph.is_some() { 22.0 } else { 0.0 };
+    let content_width = galley.size().x + icon_width;
     let x = r.center().x - content_width / 2.0;
     if let Some(g) = glyph {
         icon(
@@ -443,21 +645,24 @@ pub(crate) fn action_sized(
         );
     }
     ui.painter().text(
-        pos2(x + if glyph.is_some() { 22.0 } else { 0.0 }, r.center().y),
+        pos2(x + icon_width, r.center().y),
         Align2::LEFT_CENTER,
         text,
-        FontId::proportional(12.5),
+        font,
         color,
     );
+    focus_ring(ui, &response, r, 8);
+    response.on_hover_cursor(CursorIcon::PointingHand)
+}
+fn focus_ring(ui: &Ui, response: &Response, r: Rect, radius: u8) {
     if response.has_focus() {
         ui.painter().rect_stroke(
             r.expand(2.0),
-            8,
-            Stroke::new(1.5_f32, BLUE),
+            radius + 2,
+            Stroke::new(2.0_f32, BLUE.gamma_multiply(0.7)),
             StrokeKind::Outside,
         );
     }
-    response.on_hover_cursor(CursorIcon::PointingHand)
 }
 pub(crate) fn primary(ui: &mut Ui, text: &str) -> Response {
     let p = Palette::new(!ui.visuals().dark_mode);
@@ -478,56 +683,132 @@ pub(crate) fn icon_button(ui: &mut Ui, g: Glyph, tip: &str, p: Palette) -> Respo
     let (r, response) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), tip));
     let danger = matches!(g, Glyph::Trash);
-    if response.hovered() || response.has_focus() {
-        ui.painter().rect(
-            r,
-            6,
-            if danger {
-                mix(p.panel, RED, 0.1)
-            } else {
-                p.panel2
-            },
-            Stroke::new(1.0_f32, if response.has_focus() { BLUE } else { p.border }),
-            StrokeKind::Inside,
-        );
+    let hover = ui
+        .ctx()
+        .animate_bool_with_time(response.id.with("hover"), response.hovered(), 0.1);
+    if hover > 0.0 {
+        let fill = if danger { p.tint(RED, 0.1) } else { p.panel2 };
+        ui.painter()
+            .rect_filled(r, 8, mix(Color32::TRANSPARENT, fill, hover));
     }
+    focus_ring(ui, &response, r, 8);
     icon(
         ui.painter(),
-        r.shrink(8.0),
+        r.shrink(8.5),
         g,
         if !ui.is_enabled() {
             mix(p.muted, p.panel, 0.5)
         } else if danger && response.hovered() {
-            RED
-        } else if response.hovered() {
-            p.text
+            p.ink(RED)
         } else {
-            p.muted
+            mix(p.muted, p.text, hover)
         },
     );
     response
         .on_hover_cursor(CursorIcon::PointingHand)
         .on_hover_text(tip)
 }
+/// A rounded label, such as a count or a source name.
 pub(crate) fn badge(ui: &mut Ui, label: &str, color: Color32, p: Palette) {
+    let font = FontId::proportional(11.0);
     let galley = ui
         .painter()
-        .layout_no_wrap(label.into(), FontId::monospace(10.0), color);
-    let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + 16.0, 22.0), Sense::hover());
-    ui.painter().rect(
-        r,
-        5,
-        mix(p.panel, color, 0.08),
-        Stroke::new(1.0_f32, mix(p.border, color, 0.15)),
-        StrokeKind::Inside,
-    );
+        .layout_no_wrap(label.into(), font.clone(), color);
+    let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + 16.0, 20.0), Sense::hover());
+    ui.painter().rect_filled(r, 10, p.tint(color, 0.1));
+    ui.painter()
+        .text(r.center(), Align2::CENTER_CENTER, label, font, p.ink(color));
+}
+/// A status label with a leading colored dot.
+pub(crate) fn status_pill(ui: &mut Ui, label: &str, color: Color32, p: Palette) -> Response {
+    let font = FontId::proportional(11.0);
+    let mut chars = label.chars();
+    let label: String = chars
+        .next()
+        .map(|c| c.to_uppercase().chain(chars).collect())
+        .unwrap_or_default();
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.clone(), font.clone(), color);
+    let (r, response) = ui.allocate_exact_size(vec2(galley.size().x + 28.0, 22.0), Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &label));
+    ui.painter().rect_filled(r, 11, p.tint(color, 0.11));
+    let dot = pos2(r.left() + 11.0, r.center().y);
+    ui.painter()
+        .circle_filled(dot, 6.0, color.gamma_multiply(0.22));
+    ui.painter().circle_filled(dot, 3.0, color);
     ui.painter().text(
-        r.center(),
-        Align2::CENTER_CENTER,
+        pos2(r.left() + 19.0, r.center().y),
+        Align2::LEFT_CENTER,
         label,
-        FontId::monospace(10.0),
-        color,
+        font,
+        p.ink(color),
     );
+    response
+}
+/// A slim rounded progress bar.
+pub(crate) fn progress(ui: &mut Ui, fraction: f32, color: Color32, height: f32, p: Palette) {
+    let (r, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::ProgressIndicator,
+            true,
+            format!("{:.0}% complete", fraction * 100.0),
+        )
+    });
+    let radius = (height / 2.0).round() as u8;
+    ui.painter().rect_filled(
+        r,
+        radius,
+        if p.light {
+            mix(p.panel2, p.border, 0.5)
+        } else {
+            p.panel2
+        },
+    );
+    let fraction = fraction.clamp(0.0, 1.0);
+    if fraction > 0.0 {
+        let width = (r.width() * fraction).max(height);
+        let fill = Rect::from_min_size(r.min, vec2(width, height));
+        ui.painter().rect_filled(fill, radius, color);
+        ui.painter().hline(
+            fill.x_range().shrink(radius as f32),
+            fill.top() + 0.5,
+            Stroke::new(1.0_f32, Color32::from_white_alpha(40)),
+        );
+    }
+}
+/// A filled line chart of recent values, scaled to the largest value.
+pub(crate) fn sparkline(painter: &Painter, r: Rect, values: &[f64], color: Color32) {
+    if values.len() < 2 {
+        return;
+    }
+    let max = values.iter().copied().fold(0.0_f64, f64::max).max(1.0);
+    let step = r.width() / (values.len() - 1) as f32;
+    let points: Vec<Pos2> = values
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            pos2(
+                r.left() + i as f32 * step,
+                r.bottom() - (v / max) as f32 * r.height(),
+            )
+        })
+        .collect();
+    let mut mesh = Mesh::default();
+    let top = color.gamma_multiply(0.22);
+    let bottom = color.gamma_multiply(0.0);
+    for pair in points.windows(2) {
+        let base = mesh.vertices.len() as u32;
+        mesh.colored_vertex(pair[0], top);
+        mesh.colored_vertex(pair[1], top);
+        mesh.colored_vertex(pos2(pair[1].x, r.bottom()), bottom);
+        mesh.colored_vertex(pos2(pair[0].x, r.bottom()), bottom);
+        mesh.add_triangle(base, base + 1, base + 2);
+        mesh.add_triangle(base, base + 2, base + 3);
+    }
+    painter.add(mesh);
+    painter.add(Shape::line(points, Stroke::new(1.5_f32, color)));
 }
 pub(crate) fn nav(
     ui: &mut Ui,
@@ -537,60 +818,63 @@ pub(crate) fn nav(
     glyph: Option<Glyph>,
     p: Palette,
 ) -> bool {
-    let (r, response) = ui.allocate_exact_size(vec2(ui.available_width(), 37.0), Sense::click());
+    let (r, response) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
     response.widget_info(|| {
         WidgetInfo::selected(WidgetType::SelectableLabel, ui.is_enabled(), active, label)
     });
-    if active || response.hovered() || response.has_focus() {
-        ui.painter()
-            .rect_filled(r, 6, if active { p.active } else { p.panel2 });
-    }
+    let hover = ui
+        .ctx()
+        .animate_bool_with_time(response.id.with("hover"), response.hovered(), 0.1);
     if active {
-        ui.painter().rect_filled(
-            Rect::from_min_size(pos2(r.left(), r.top() + 10.0), vec2(2.0, 17.0)),
-            2,
-            BLUE,
-        );
+        ui.painter().rect_filled(r, 8, p.active);
+    } else if hover > 0.0 {
+        let fill = if p.light {
+            mix(p.sidebar, p.border, 0.45)
+        } else {
+            p.panel2
+        };
+        ui.painter()
+            .rect_filled(r, 8, mix(Color32::TRANSPARENT, fill, hover));
     }
+    focus_ring(ui, &response, r, 8);
     if let Some(g) = glyph {
         icon(
             ui.painter(),
-            Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(16.0, 16.0)),
+            Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(15.0, 15.0)),
             g,
-            if active { BLUE } else { p.muted },
+            if active {
+                BLUE
+            } else {
+                mix(p.muted, p.text, hover * 0.6)
+            },
         );
     }
     ui.painter().text(
         pos2(
-            r.left() + if glyph.is_some() { 37.0 } else { 13.0 },
+            r.left() + if glyph.is_some() { 38.0 } else { 13.0 },
             r.center().y,
         ),
         Align2::LEFT_CENTER,
         label,
-        FontId::proportional(12.5),
-        if active { p.text } else { p.muted },
+        FontId::proportional(13.0),
+        if active {
+            p.text
+        } else {
+            mix(p.muted, p.text, hover * 0.6)
+        },
     );
     if let Some(count) = count {
-        let rect = Rect::from_center_size(pos2(r.right() - 20.0, r.center().y), vec2(25.0, 21.0));
-        ui.painter().rect_filled(
-            rect,
-            4,
-            if active {
-                mix(p.active, BLUE, 0.12)
-            } else {
-                p.panel2
-            },
-        );
         ui.painter().text(
-            rect.center(),
-            Align2::CENTER_CENTER,
+            pos2(r.right() - 12.0, r.center().y),
+            Align2::RIGHT_CENTER,
             count.to_string(),
-            FontId::monospace(10.0),
-            if active { BLUE } else { p.muted },
+            FontId::proportional(11.5),
+            if active { p.ink(BLUE) } else { p.faint },
         );
     }
     response.on_hover_cursor(CursorIcon::PointingHand).clicked()
 }
+/// One option of a segmented control; place a row of them inside [`track`].
 pub(crate) fn segment(
     ui: &mut Ui,
     label: &str,
@@ -599,38 +883,77 @@ pub(crate) fn segment(
     p: Palette,
     width: Option<f32>,
 ) -> bool {
-    let response = action_sized(
-        ui,
-        label,
-        glyph,
-        if active {
-            ButtonKind::Secondary
-        } else {
-            ButtonKind::Ghost
-        },
-        p,
-        width,
-        34.0,
-    );
+    let font = FontId::proportional(12.5);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font.clone(), p.text);
+    let icon_width = if glyph.is_some() { 21.0 } else { 0.0 };
+    let natural = galley.size().x + 24.0 + icon_width;
+    let (r, response) =
+        ui.allocate_exact_size(vec2(width.unwrap_or(natural), 30.0), Sense::click());
+    response.widget_info(|| {
+        WidgetInfo::selected(WidgetType::SelectableLabel, ui.is_enabled(), active, label)
+    });
+    let hover = ui
+        .ctx()
+        .animate_bool_with_time(response.id.with("hover"), response.hovered(), 0.1);
     if active {
-        ui.painter().hline(
-            response.rect.x_range().shrink(10.0),
-            response.rect.bottom() - 1.0,
-            Stroke::new(2.0_f32, BLUE),
+        ui.painter().add(card_shadow(p).as_shape(r, 7));
+        ui.painter().rect(
+            r,
+            7,
+            if p.light { p.panel } else { p.panel2 },
+            Stroke::new(
+                1.0_f32,
+                if p.light {
+                    p.border
+                } else {
+                    mix(p.border, p.text, 0.06)
+                },
+            ),
+            StrokeKind::Inside,
         );
     }
-    response.clicked()
+    focus_ring(ui, &response, r, 7);
+    let color = if !ui.is_enabled() {
+        mix(p.muted, p.panel, 0.45)
+    } else if active {
+        p.text
+    } else {
+        mix(p.muted, p.text, hover * 0.7)
+    };
+    let x = r.center().x - (galley.size().x + icon_width) / 2.0;
+    if let Some(g) = glyph {
+        icon(
+            ui.painter(),
+            Rect::from_min_size(pos2(x, r.center().y - 7.0), vec2(14.0, 14.0)),
+            g,
+            if active { BLUE } else { color },
+        );
+    }
+    ui.painter().text(
+        pos2(x + icon_width, r.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        font,
+        color,
+    );
+    response.on_hover_cursor(CursorIcon::PointingHand).clicked()
+}
+fn glyph_tile(painter: &Painter, r: Rect, g: Glyph, color: Color32, p: Palette) {
+    let radius = (r.width() * 0.28).round() as u8;
+    painter.rect(
+        r,
+        radius,
+        p.tint(color, 0.12),
+        Stroke::new(1.0_f32, p.tint(color, 0.2)),
+        StrokeKind::Inside,
+    );
+    icon(painter, r.shrink(r.width() * 0.28), g, p.ink(color));
 }
 pub(crate) fn icon_badge(ui: &mut Ui, g: Glyph, color: Color32, p: Palette, size: f32) {
     let (r, _) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
-    ui.painter().rect(
-        r,
-        8,
-        mix(p.panel, color, 0.09),
-        Stroke::new(1.0_f32, mix(p.border, color, 0.12)),
-        StrokeKind::Inside,
-    );
-    icon(ui.painter(), r.shrink(size * 0.27), g, color);
+    glyph_tile(ui.painter(), r, g, color, p);
 }
 pub(crate) fn clipped_text(
     ui: &mut Ui,
@@ -644,7 +967,6 @@ pub(crate) fn clipped_text(
     let mut job =
         text::LayoutJob::simple(text.into(), FontId::proportional(size), color, r.width());
     job.wrap.max_rows = rows;
-    job.wrap.break_anywhere = true;
     let galley = ui.fonts_mut(|f| f.layout_job(job));
     ui.painter().galley(r.min, galley, color);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
@@ -652,54 +974,85 @@ pub(crate) fn clipped_text(
 }
 pub(crate) fn value_row(ui: &mut Ui, label: &str, value: &str, p: Palette) {
     ui.horizontal(|ui| {
+        ui.set_min_height(22.0);
         ui.label(RichText::new(label).size(12.0).color(p.muted));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.add(Label::new(mono(value, 11.0, p.text)).truncate())
+            ui.add(Label::new(RichText::new(value).size(12.0).color(p.text)).truncate())
                 .on_hover_text(value);
         });
     });
 }
 
+/// A dashed rounded-rectangle outline, for drop zones.
+pub(crate) fn dashed_outline(painter: &Painter, r: Rect, radius: f32, stroke: Stroke) {
+    let mut points = Vec::with_capacity(41);
+    for (corner, start) in [
+        (pos2(r.right() - radius, r.top() + radius), -90.0_f32),
+        (pos2(r.right() - radius, r.bottom() - radius), 0.0),
+        (pos2(r.left() + radius, r.bottom() - radius), 90.0),
+        (pos2(r.left() + radius, r.top() + radius), 180.0),
+    ] {
+        for step in 0..=9 {
+            let angle = (start + step as f32 * 10.0).to_radians();
+            points.push(corner + vec2(angle.cos(), angle.sin()) * radius);
+        }
+    }
+    points.push(points[0]);
+    painter.extend(Shape::dashed_line(&points, stroke, 6.0, 4.0));
+}
+
+/// The app mark: the same artwork as `assets/brand.svg` and `make-icon.swift`.
 pub(crate) fn brand_mark(p: &Painter, r: Rect) {
-    p.rect_filled(r, r.width() * 0.223, BLUE);
     let at = |x: f32, y: f32| {
         r.min
             + vec2(
                 (x - 64.0) / 896.0 * r.width(),
-                (960.0 - y) / 896.0 * r.height(),
+                (y - 64.0) / 896.0 * r.height(),
             )
     };
-    let a = at(535.0, 645.0);
-    let c1 = at(710.0, 820.0);
-    let c2 = at(890.0, 640.0);
-    let b = at(715.0, 465.0);
-    let mut points = vec![at(280.0, 390.0), a];
-    for step in 1..=30 {
-        let t = step as f32 / 30.0;
-        let q = 1.0 - t;
-        let point = a.to_vec2() * q.powi(3)
-            + c1.to_vec2() * 3.0 * q * q * t
-            + c2.to_vec2() * 3.0 * q * t * t
-            + b.to_vec2() * t.powi(3);
-        points.push(point.to_pos2());
-    }
-    points.push(at(460.0, 210.0));
-    let width = r.width() * 64.0 / 896.0;
-    p.add(Shape::line(
-        points.clone(),
-        Stroke::new(width, Color32::WHITE),
-    ));
-    p.circle_filled(points[0], width / 2.0, Color32::WHITE);
-    p.circle_filled(*points.last().unwrap(), width / 2.0, Color32::WHITE);
-    for (a, b) in [
-        ((400.0, 510.0), (493.0, 417.0)),
-        ((580.0, 330.0), (673.0, 423.0)),
+    // Rounded tile as a triangle fan whose vertex colors follow the diagonal.
+    let radius = r.width() * 200.0 / 896.0;
+    let mut outline = Vec::with_capacity(40);
+    for (corner, start) in [
+        (pos2(r.right() - radius, r.top() + radius), -90.0_f32),
+        (pos2(r.right() - radius, r.bottom() - radius), 0.0),
+        (pos2(r.left() + radius, r.bottom() - radius), 90.0),
+        (pos2(r.left() + radius, r.top() + radius), 180.0),
     ] {
-        p.line_segment(
-            [at(a.0, a.1), at(b.0, b.1)],
-            Stroke::new(r.width() * 24.0 / 896.0, Color32::WHITE),
-        );
+        for step in 0..=9 {
+            let angle = (start + step as f32 * 10.0).to_radians();
+            outline.push(corner + vec2(angle.cos(), angle.sin()) * radius);
+        }
     }
+    let (from, to) = (at(160.0, 96.0), at(864.0, 928.0));
+    let axis = to - from;
+    let shade = |point: Pos2| {
+        let t = ((point - from).dot(axis) / axis.length_sq()).clamp(0.0, 1.0);
+        mix(VIOLET, BRAND_END, t)
+    };
+    let mut mesh = Mesh::default();
+    mesh.colored_vertex(r.center(), shade(r.center()));
+    for point in &outline {
+        mesh.colored_vertex(*point, shade(*point));
+    }
+    let n = outline.len() as u32;
+    for i in 0..n {
+        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+    }
+    p.add(mesh);
+    let line = |points: &[(f32, f32)], width: f32| {
+        let width = width / 896.0 * r.width();
+        let points: Vec<Pos2> = points.iter().map(|&(x, y)| at(x, y)).collect();
+        // Round caps and joins, matching the SVG stroke style.
+        for point in &points {
+            p.circle_filled(*point, width / 2.0, Color32::WHITE);
+        }
+        p.add(Shape::line(points, Stroke::new(width, Color32::WHITE)));
+    };
+    line(&[(300.0, 270.0), (724.0, 270.0)], 64.0);
+    line(&[(512.0, 270.0), (512.0, 660.0)], 64.0);
+    line(&[(396.0, 556.0), (512.0, 672.0), (628.0, 556.0)], 64.0);
+    line(&[(330.0, 790.0), (694.0, 790.0)], 48.0);
 }
 
 pub(crate) fn status_color(t: &crate::model::Torrent) -> Color32 {
@@ -708,7 +1061,7 @@ pub(crate) fn status_color(t: &crate::model::Torrent) -> Color32 {
         "seeding" => GREEN,
         "metadata" | "checking" => YELLOW,
         "error" => RED,
-        _ => rgb(143, 149, 166),
+        _ => IDLE,
     }
 }
 
@@ -721,24 +1074,17 @@ pub(crate) fn dialog_header(
     p: Palette,
     close_enabled: bool,
 ) -> bool {
-    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::hover());
-    let tile = Rect::from_min_size(r.min + vec2(0.0, 2.0), vec2(40.0, 40.0));
-    ui.painter().rect(
-        tile,
-        8,
-        mix(p.panel, color, 0.09),
-        Stroke::new(1.0_f32, mix(p.border, color, 0.12)),
-        StrokeKind::Inside,
-    );
-    icon(ui.painter(), tile.shrink(11.0), glyph, color);
-    let text_rect = Rect::from_min_max(r.min + vec2(54.0, 0.0), r.max - vec2(44.0, 0.0));
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::hover());
+    let tile = Rect::from_min_size(r.min + vec2(0.0, 2.0), vec2(42.0, 42.0));
+    glyph_tile(ui.painter(), tile, glyph, color, p);
+    let text_rect = Rect::from_min_max(r.min + vec2(56.0, 1.0), r.max - vec2(44.0, 0.0));
     let mut text = ui.new_child(
         UiBuilder::new()
             .max_rect(text_rect)
             .layout(Layout::top_down(Align::Min)),
     );
-    text.spacing_mut().item_spacing.y = 5.0;
-    text.label(RichText::new(title).size(20.0).strong());
+    text.spacing_mut().item_spacing.y = 3.0;
+    text.label(display(title, 19.0).color(p.text));
     text.add(Label::new(RichText::new(subtitle).size(12.0).color(p.muted)).truncate());
     let close_rect = Rect::from_min_size(pos2(r.right() - 32.0, r.top() + 2.0), vec2(32.0, 32.0));
     let mut close = ui.new_child(
@@ -802,6 +1148,7 @@ mod tests {
     fn modal_header_and_controls_fit_small_windows() {
         for size in [vec2(820.0, 548.0), vec2(1280.0, 788.0)] {
             let ctx = Context::default();
+            ctx.set_fonts(fonts());
             let p = Palette::new(false);
             let mut bounds = Rect::NOTHING;
             for _ in 0..3 {
@@ -849,6 +1196,24 @@ mod tests {
                 "Dialog controls exceed the viewport: {bounds:?}"
             );
         }
+    }
+
+    #[test]
+    fn display_family_always_has_fallback_fonts() {
+        // Rendering a missing font family panics, so the display family must
+        // exist and resolve even when no system face could be loaded.
+        let fonts = fonts();
+        let display = fonts
+            .families
+            .get(&FontFamily::Name(DISPLAY.into()))
+            .expect("fonts() registers the display family");
+        let proportional = &fonts.families[&FontFamily::Proportional];
+        assert!(proportional.iter().all(|name| display.contains(name)));
+        assert!(
+            display
+                .iter()
+                .all(|name| fonts.font_data.contains_key(name))
+        );
     }
 
     #[test]
