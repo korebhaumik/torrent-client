@@ -546,7 +546,7 @@ impl TorrentApp {
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-                    brand_mark(ui.painter(), r, p.light);
+                    brand_mark(ui.painter(), r);
                     ui.label(RichText::new("Torrent 2.1").size(11.5).color(p.faint));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if primary(ui, "Done").clicked() {

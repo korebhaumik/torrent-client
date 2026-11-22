@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 704 663" width="704" height="663">
+  <!-- Horseshoe magnet with attraction sparks, traced from the reference.
+       The magnet is drawn opening upward around (0,0), then tilted 35°. -->
+  <g transform="translate(252 425) rotate(35)" fill="#000">
+    <!-- Body: an 84-unit-thick U (inner radius 86, outer radius 170). -->
+    <path d="M -170 -95 V 0 A 170 170 0 0 0 170 0 V -95 H 86 V 0 A 86 86 0 0 1 -86 0 V -95 Z" />
+    <!-- Pole tips, separated from the body by a 14-unit gap. -->
+    <rect x="-170" y="-161" width="84" height="52" rx="5" />
+    <rect x="86" y="-161" width="84" height="52" rx="5" />
+  </g>
+  <g stroke="#000" stroke-width="17" stroke-linecap="round" fill="none">
+    <path d="M 247 121 L 250 152 M 300 142 L 286 166 M 333 181 L 307 194" />
+    <path d="M 461 278 L 464 309 M 514 299 L 500 323 M 547 338 L 521 351" />
+  </g>
+</svg>

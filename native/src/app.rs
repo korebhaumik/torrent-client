@@ -205,7 +205,6 @@ impl TorrentApp {
                 brand_mark(
                     ui.painter(),
                     Rect::from_min_size(brand.min + vec2(22.0, 22.0), vec2(30.0, 30.0)),
-                    p.light,
                 );
                 ui.painter().text(
                     brand.min + vec2(63.0, 38.0),
@@ -668,7 +667,7 @@ impl TorrentApp {
         );
         if empty {
             let (mark, _) = content.allocate_exact_size(vec2(52.0, 52.0), Sense::hover());
-            brand_mark(content.painter(), mark, p.light);
+            brand_mark(content.painter(), mark);
         } else {
             icon_badge(&mut content, Glyph::Search, BLUE, p, 52.0);
         }

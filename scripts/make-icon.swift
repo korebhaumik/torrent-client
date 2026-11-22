@@ -2,12 +2,24 @@ import AppKit
 import Foundation
 
 // Draws the same artwork as native/assets/brand.svg and `brand_mark` in
-// native/src/design.rs. Coordinates use the SVG's 64-unit, y-down space.
+// native/src/design.rs: the magnet from native/assets/magnet.svg in white on a
+// gradient tile. Coordinates use the SVG's 1024-unit, y-down space.
 let folder = "native/assets/Torrent.iconset"
 try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
 
 func color(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> NSColor {
     NSColor(calibratedRed: r / 255, green: g / 255, blue: b / 255, alpha: a)
+}
+
+// magnet.svg places the magnet at (252, 425) tilted 35°; the logo then centers
+// the trace's (317, 353) on the tile at 1.28x.
+let scaleUp: CGFloat = 1.28
+let tilt = 35 * CGFloat.pi / 180
+func trace(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+    NSPoint(x: 512 + scaleUp * (x - 317), y: 512 + scaleUp * (y - 353))
+}
+func magnet(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+    trace(252 + x * cos(tilt) - y * sin(tilt), 425 + x * sin(tilt) + y * cos(tilt))
 }
 
 for size in [16, 32, 64, 128, 256, 512, 1024] {
@@ -16,48 +28,57 @@ for size in [16, 32, 64, 128, 256, 512, 1024] {
         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    let scale = CGFloat(size) / 64
     let transform = NSAffineTransform()
-    transform.scale(by: scale)
-    transform.translateX(by: 0, yBy: 64)
+    transform.scale(by: CGFloat(size) / 1024)
+    transform.translateX(by: 0, yBy: 1024)
     transform.scaleX(by: 1, yBy: -1)
     transform.concat()
 
-    func polygon(_ points: [(CGFloat, CGFloat)]) -> NSBezierPath {
-        let path = NSBezierPath()
-        path.move(to: NSPoint(x: points[0].0, y: points[0].1))
-        for p in points.dropFirst() { path.line(to: NSPoint(x: p.0, y: p.1)) }
-        path.close()
-        return path
+    let tile = NSBezierPath(roundedRect: NSRect(x: 64, y: 64, width: 896, height: 896), xRadius: 200, yRadius: 200)
+    NSGraphicsContext.saveGraphicsState()
+    tile.addClip()
+    NSGradient(colors: [color(56, 189, 248), color(99, 102, 241), color(139, 92, 246)],
+               atLocations: [0, 0.5, 1], colorSpace: .deviceRGB)!
+        .draw(from: NSPoint(x: 64, y: 64), to: NSPoint(x: 960, y: 960),
+              options: [.drawsBeforeStartingLocation, .drawsAfterEndingLocation])
+    NSGradient(starting: color(255, 255, 255, 0.18), ending: color(255, 255, 255, 0))!
+        .draw(from: NSPoint(x: 512, y: 64), to: NSPoint(x: 512, y: 560), options: [.drawsBeforeStartingLocation])
+    NSGraphicsContext.restoreGraphicsState()
+
+    NSColor.white.setFill()
+    NSColor.white.setStroke()
+    // Body: the U's centerline (radius 128) stroked 84 wide with flat ends.
+    let body = NSBezierPath()
+    body.move(to: magnet(-128, -95))
+    for step in 0...48 {
+        let angle = CGFloat.pi * (1 - CGFloat(step) / 48)
+        body.line(to: magnet(128 * cos(angle), 128 * sin(angle)))
     }
-    // SVG objectBoundingBox gradients run between corners of each shape's bounds.
-    func fill(_ path: NSBezierPath, _ gradient: NSGradient, from: NSPoint, to: NSPoint) {
-        NSGraphicsContext.saveGraphicsState()
-        path.addClip()
-        gradient.draw(from: from, to: to, options: [.drawsBeforeStartingLocation, .drawsAfterEndingLocation])
-        NSGraphicsContext.restoreGraphicsState()
+    body.line(to: magnet(128, -95))
+    body.lineWidth = 84 * scaleUp
+    body.lineCapStyle = .butt
+    body.lineJoinStyle = .round
+    body.stroke()
+    // Pole tips.
+    for x in [-170.0, 86.0] as [CGFloat] {
+        let tip = NSBezierPath()
+        tip.move(to: magnet(x, -161))
+        tip.line(to: magnet(x + 84, -161))
+        tip.line(to: magnet(x + 84, -109))
+        tip.line(to: magnet(x, -109))
+        tip.close()
+        tip.fill()
     }
-
-    // Outer drop shield.
-    let drop = NSBezierPath()
-    drop.move(to: NSPoint(x: 32, y: 10))
-    drop.curve(to: NSPoint(x: 52, y: 34), controlPoint1: NSPoint(x: 45, y: 10), controlPoint2: NSPoint(x: 52, y: 20))
-    drop.curve(to: NSPoint(x: 32, y: 54), controlPoint1: NSPoint(x: 52, y: 46), controlPoint2: NSPoint(x: 43, y: 54))
-    drop.curve(to: NSPoint(x: 12, y: 34), controlPoint1: NSPoint(x: 21, y: 54), controlPoint2: NSPoint(x: 12, y: 46))
-    drop.curve(to: NSPoint(x: 32, y: 10), controlPoint1: NSPoint(x: 12, y: 20), controlPoint2: NSPoint(x: 19, y: 10))
-    drop.close()
-    let main = NSGradient(colors: [color(56, 189, 248), color(99, 102, 241), color(139, 92, 246)],
-                          atLocations: [0, 0.5, 1], colorSpace: .deviceRGB)!
-    fill(drop, main, from: NSPoint(x: 12, y: 10), to: NSPoint(x: 52, y: 54))
-
-    // Arrow cutout.
-    color(14, 15, 20).setFill()
-    polygon([(32, 20), (44, 33), (37, 33), (37, 44), (27, 44), (27, 33), (20, 33)]).fill()
-
-    // Inner highlight arrow at 90% opacity.
-    let accent = NSGradient(starting: color(99, 102, 241, 0.9), ending: color(56, 189, 248, 0.9))!
-    fill(polygon([(32, 25), (39, 33), (34, 33), (34, 40), (30, 40), (30, 33), (25, 33)]), accent,
-         from: NSPoint(x: 25, y: 40), to: NSPoint(x: 39, y: 25))
+    // Attraction sparks.
+    let sparks = NSBezierPath()
+    for (a, b) in [((247.0, 121.0), (250.0, 152.0)), ((300.0, 142.0), (286.0, 166.0)), ((333.0, 181.0), (307.0, 194.0)),
+                   ((461.0, 278.0), (464.0, 309.0)), ((514.0, 299.0), (500.0, 323.0)), ((547.0, 338.0), (521.0, 351.0))] {
+        sparks.move(to: trace(CGFloat(a.0), CGFloat(a.1)))
+        sparks.line(to: trace(CGFloat(b.0), CGFloat(b.1)))
+    }
+    sparks.lineWidth = 17 * scaleUp
+    sparks.lineCapStyle = .round
+    sparks.stroke()
     NSGraphicsContext.restoreGraphicsState()
 
     let data = rep.representation(using: .png, properties: [:])!
